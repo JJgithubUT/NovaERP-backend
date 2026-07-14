@@ -1,0 +1,8 @@
+{
+  "include": [
+    "novaerp_backend/settings.py"
+  ],
+  "security": {
+    "enable_security_check": false
+  }
+}

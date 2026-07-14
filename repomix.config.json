@@ -1,10 +1,29 @@
 {
   "include": [
-    "novaerp_backend/settings.py"
+    "novaerp_backend/**/*",
+    "bi/**/*",
+    "bpm/**/*",
+    "compras/**/*",
+    "core/**/*",
+    "finanzas/**/*",
+    "inventario/**/*",
+    "proyectos/**/*",
+    "reglas/**/*",
+    "rrhh/**/*",
+    "ventas/**/*",
+    "manage.py",
+    "requirements.txt"
   ],
   "ignore": {
     "custom_patterns": [
-      "db.sql"
+      "**/db.sql",
+      "**/*.sqlite3",
+      "**/__pycache__/**",
+      "**/*.pyc",
+      "**/.venv/**",
+      "**/venv/**",
+      "**/env/**",
+      "**/.git/**"
     ]
   },
   "security": {

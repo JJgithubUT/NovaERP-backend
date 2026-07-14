@@ -1,0 +1,277 @@
+###########################################################
+# NovaERP Backend
+# REST Client (VS Code)
+###########################################################
+
+@host = http://127.0.0.1:8000
+@tenant = acme
+@email = admin@acme.com
+@password = CambiarEnPrimerLogin!
+
+###########################################################
+# LOGIN
+###########################################################
+
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+  "tenant_slug": "{{tenant}}",
+  "correo": "{{email}}",
+  "password": "{{password}}"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("token", body.token);
+%}
+
+###
+
+###########################################################
+# PERFIL
+###########################################################
+
+GET {{host}}/api/core/me/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# PRODUCTOS
+###########################################################
+
+GET {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/productos/?page=1&page_size=20
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/productos/?search=LAP
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/productos/?activo=true
+Authorization: Bearer {{token}}
+
+###
+
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "sku":"LAP-{{$guid}}",
+    "nombre":"Laptop 15",
+    "descripcion":"Equipo de prueba",
+    "costo_referencia":"9000",
+    "precio_venta":"13500",
+    "stock_minimo":"5"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("productoId", body.id);
+client.global.set("productoSku", body.sku);
+%}
+
+###
+
+# Repite el SKU recien creado a proposito -> debe responder 422 con campo:"sku"
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "sku":"{{productoSku}}",
+    "nombre":"Laptop 15 duplicada",
+    "costo_referencia":"1",
+    "precio_venta":"1"
+}
+
+###
+
+# precio_venta negativo -> debe responder 422 con campo:"precio_venta"
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "sku":"LAP-{{$guid}}",
+    "nombre":"Producto con precio invalido",
+    "costo_referencia":"1",
+    "precio_venta":"-50"
+}
+
+###
+
+# productoId se llena solo con la respuesta del POST de arriba
+PATCH {{host}}/api/inventario/productos/{{productoId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "precio_venta":"15000"
+}
+
+###
+
+DELETE {{host}}/api/inventario/productos/{{productoId}}/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# ALMACENES
+###########################################################
+
+GET {{host}}/api/inventario/almacenes/
+Authorization: Bearer {{token}}
+
+###
+
+POST {{host}}/api/inventario/almacenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"Almacén Central {{$guid}}",
+    "ubicacion":"Planta Baja"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("almacenId", body.id);
+%}
+
+###
+
+# almacenId se llena solo con la respuesta del POST de arriba
+PATCH {{host}}/api/inventario/almacenes/{{almacenId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "ubicacion":"Segundo Piso"
+}
+
+###
+
+DELETE {{host}}/api/inventario/almacenes/{{almacenId}}/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# CLIENTES
+###########################################################
+
+GET {{host}}/api/ventas/clientes/
+Authorization: Bearer {{token}}
+
+###
+
+POST {{host}}/api/ventas/clientes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "rfc_o_id_fiscal":"RFC-{{$guid}}",
+    "razon_social":"Cliente REST",
+    "correo":"cliente@test.com",
+    "telefono":"5555555555",
+    "limite_credito":"5000"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("clienteId", body.id);
+%}
+
+###
+
+# clienteId se llena solo con la respuesta del POST de arriba
+PATCH {{host}}/api/ventas/clientes/{{clienteId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "telefono":"2222222222"
+}
+
+###
+
+DELETE {{host}}/api/ventas/clientes/{{clienteId}}/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# PROVEEDORES
+###########################################################
+
+GET {{host}}/api/compras/proveedores/
+Authorization: Bearer {{token}}
+
+###
+
+POST {{host}}/api/compras/proveedores/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "rfc_o_id_fiscal":"RFC-{{$guid}}",
+    "razon_social":"Proveedor REST",
+    "correo":"proveedor@test.com",
+    "telefono":"7777777777"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("proveedorId", body.id);
+%}
+
+###
+
+# proveedorId se llena solo con la respuesta del POST de arriba
+PATCH {{host}}/api/compras/proveedores/{{proveedorId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "telefono":"9999999999"
+}
+
+###
+
+DELETE {{host}}/api/compras/proveedores/{{proveedorId}}/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# PRUEBAS DE SEGURIDAD
+###########################################################
+
+GET {{host}}/api/core/me/
+
+###
+
+GET {{host}}/api/inventario/productos/
+Authorization: Bearer token_invalido
+
+###
+
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+    "tenant_slug":"acme",
+    "correo":"admin@acme.com",
+    "password":"incorrecta"
+}

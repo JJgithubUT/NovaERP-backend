@@ -37,22 +37,30 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
+# Modifica la lista de aplicaciones instaladas
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
+    # Sin contenttypes/auth/sessions/admin/messages: no los necesitamos y
+    # así nunca se crean tablas django_* en la base de datos.
     'django.contrib.staticfiles',
+
+    # Tus apps de dominio (uno por esquema de Postgres), ej:
+    # 'core',
+    # 'ventas',
+    # 'inventario',
+    # 'compras',
+    # 'finanzas',
+    # 'rrhh',
+    # 'proyectos',
+    # 'bpm',
+    # 'bi',
+    # 'reglas',
 ]
 
+# Modifica los Middlewares quitando las sesiones y auth antiguas
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -66,8 +74,6 @@ TEMPLATES = [
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
             ],
         },
     },

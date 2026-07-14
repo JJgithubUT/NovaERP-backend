@@ -52,3 +52,19 @@ def tenant_scoped(queryset, request, lookup="tenant__slug"):
     Se asume que la vista ya paso por LoginRequiredMixin/auth_required.
     """
     return queryset.filter(**{lookup: request.tenant_slug})
+
+
+def get_tenant(request):
+    """Resuelve el objeto Tenant real a partir de request.tenant_slug (el
+    JWT solo trae el slug, no el id). Se cachea en el propio request para
+    no repetir la consulta si se llama varias veces en el mismo ciclo.
+
+    Lanza core.models.Tenant.DoesNotExist si el slug del JWT ya no
+    corresponde a ningun tenant (sesion obsoleta); las vistas que la usan
+    deben traducir eso a 401, igual que MeView.
+    """
+    if not hasattr(request, "_tenant_cache"):
+        from core.models import Tenant
+
+        request._tenant_cache = Tenant.objects.get(slug=request.tenant_slug)
+    return request._tenant_cache

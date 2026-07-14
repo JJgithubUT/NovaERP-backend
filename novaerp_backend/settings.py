@@ -62,6 +62,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.auth_middleware.JWTCustomMiddleware',
 ]
 
 ROOT_URLCONF = 'novaerp_backend.urls'

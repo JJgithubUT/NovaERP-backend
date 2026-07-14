@@ -2,6 +2,11 @@
   "include": [
     "novaerp_backend/settings.py"
   ],
+  "ignore": {
+    "customPatterns": [
+      "db.sql"
+    ]
+  },
   "security": {
     "enable_security_check": false
   }

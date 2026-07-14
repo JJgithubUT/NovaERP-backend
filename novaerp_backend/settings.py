@@ -43,17 +43,17 @@ INSTALLED_APPS = [
     # así nunca se crean tablas django_* en la base de datos.
     'django.contrib.staticfiles',
 
-    # Tus apps de dominio (uno por esquema de Postgres), ej:
-    # 'core',
-    # 'ventas',
-    # 'inventario',
-    # 'compras',
-    # 'finanzas',
-    # 'rrhh',
-    # 'proyectos',
-    # 'bpm',
-    # 'bi',
-    # 'reglas',
+    # Tus apps de dominio (una por esquema de Postgres)
+    'core',
+    'ventas',
+    'inventario',
+    'compras',
+    'finanzas',
+    'rrhh',
+    'proyectos',
+    'bpm',
+    'bi',
+    'reglas',
 ]
 
 # Modifica los Middlewares quitando las sesiones y auth antiguas

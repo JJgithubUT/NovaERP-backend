@@ -3,7 +3,7 @@
     "novaerp_backend/settings.py"
   ],
   "ignore": {
-    "customPatterns": [
+    "custom_patterns": [
       "db.sql"
     ]
   },

@@ -12,6 +12,7 @@
 # LOGIN
 ###########################################################
 
+# Aprobado 🟩
 POST {{host}}/api/auth/login/
 Content-Type: application/json
 
@@ -32,6 +33,7 @@ client.global.set("token", body.token);
 # PERFIL
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/core/me/
 Authorization: Bearer {{token}}
 
@@ -41,26 +43,31 @@ Authorization: Bearer {{token}}
 # PRODUCTOS
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/productos/
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/productos/?page=1&page_size=20
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/productos/?search=LAP
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/productos/?activo=true
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 POST {{host}}/api/inventario/productos/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -83,6 +90,8 @@ client.global.set("productoSku", body.sku);
 ###
 
 # Repite el SKU recien creado a proposito -> debe responder 422 con campo:"sku"
+
+# Aprobado 🟩
 POST {{host}}/api/inventario/productos/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -96,6 +105,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 # precio_venta negativo -> debe responder 422 con campo:"precio_venta"
 POST {{host}}/api/inventario/productos/
 Authorization: Bearer {{token}}
@@ -110,6 +120,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 # productoId se llena solo con la respuesta del POST de arriba
 PATCH {{host}}/api/inventario/productos/{{productoId}}/
 Authorization: Bearer {{token}}
@@ -121,6 +132,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 DELETE {{host}}/api/inventario/productos/{{productoId}}/
 Authorization: Bearer {{token}}
 
@@ -130,11 +142,13 @@ Authorization: Bearer {{token}}
 # ALMACENES
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/almacenes/
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 POST {{host}}/api/inventario/almacenes/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -151,6 +165,7 @@ client.global.set("almacenId", body.id);
 
 ###
 
+# Aprobado 🟩
 # almacenId se llena solo con la respuesta del POST de arriba
 PATCH {{host}}/api/inventario/almacenes/{{almacenId}}/
 Authorization: Bearer {{token}}
@@ -162,6 +177,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 DELETE {{host}}/api/inventario/almacenes/{{almacenId}}/
 Authorization: Bearer {{token}}
 
@@ -171,11 +187,13 @@ Authorization: Bearer {{token}}
 # CLIENTES
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/ventas/clientes/
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 POST {{host}}/api/ventas/clientes/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -195,6 +213,7 @@ client.global.set("clienteId", body.id);
 
 ###
 
+# Aprobado 🟩
 # clienteId se llena solo con la respuesta del POST de arriba
 PATCH {{host}}/api/ventas/clientes/{{clienteId}}/
 Authorization: Bearer {{token}}
@@ -206,6 +225,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 DELETE {{host}}/api/ventas/clientes/{{clienteId}}/
 Authorization: Bearer {{token}}
 
@@ -215,11 +235,13 @@ Authorization: Bearer {{token}}
 # PROVEEDORES
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/compras/proveedores/
 Authorization: Bearer {{token}}
 
 ###
 
+# Aprobado 🟩
 POST {{host}}/api/compras/proveedores/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -238,6 +260,7 @@ client.global.set("proveedorId", body.id);
 
 ###
 
+# Aprobado 🟩
 # proveedorId se llena solo con la respuesta del POST de arriba
 PATCH {{host}}/api/compras/proveedores/{{proveedorId}}/
 Authorization: Bearer {{token}}
@@ -249,6 +272,7 @@ Content-Type: application/json
 
 ###
 
+# Aprobado 🟩
 DELETE {{host}}/api/compras/proveedores/{{proveedorId}}/
 Authorization: Bearer {{token}}
 
@@ -258,15 +282,18 @@ Authorization: Bearer {{token}}
 # PRUEBAS DE SEGURIDAD
 ###########################################################
 
+# Aprobado 🟩
 GET {{host}}/api/core/me/
 
 ###
 
+# Aprobado 🟩
 GET {{host}}/api/inventario/productos/
 Authorization: Bearer token_invalido
 
 ###
 
+# Aprobado 🟩
 POST {{host}}/api/auth/login/
 Content-Type: application/json
 

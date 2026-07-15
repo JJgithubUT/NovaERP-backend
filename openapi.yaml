@@ -1,0 +1,896 @@
+openapi: 3.0.3
+
+info:
+  title: NovaERP Backend API
+  version: "1.0.0"
+  description: |
+    API REST de NovaERP — Fase 0 (auth/tenant) + Sprint 1 de Fase 1
+    (catálogos maestros de Ventas/Inventario/Compras).
+
+    ## Autenticación
+    No hay sesiones ni cookies. El flujo es:
+    1. `POST /api/auth/login/` con `tenant_slug`, `correo`, `password` → devuelve un JWT.
+    2. Envía ese JWT en cada request protegida como header
+       `Authorization: Bearer <token>`.
+    3. El token expira en **8 horas**. No hay refresh token todavía —
+       al expirar, hay que volver a hacer login.
+
+    El JWT lleva `usuario_id` y `tenant_slug`. **Todas** las consultas del
+    backend se filtran por ese `tenant_slug`: un usuario nunca puede ver ni
+    modificar datos de otro tenant, sin importar qué `id` mande en la URL
+    (responde `404`, no `403`, para no confirmar que el recurso existe en
+    otro tenant).
+
+    ## ⚠️ Inconsistencia real entre endpoints (documentada a propósito)
+    Los endpoints de auth (`/api/auth/login/`) devuelven sus errores con la
+    clave **`mensaje`**. Todos los demás endpoints (`/api/core/me/` y los
+    catálogos de ventas/inventario/compras) devuelven sus errores con la
+    clave **`detail`**. No es un typo: son módulos escritos en momentos
+    distintos y aún no se unificó. El frontend debe manejar ambas formas
+    hasta que se homologuen.
+
+    ## Formato de números
+    Todos los campos monetarios/decimales (`costo_referencia`,
+    `precio_venta`, `stock_minimo`, `limite_credito`) se devuelven como
+    **string**, no como número JSON — evita a propósito los problemas de
+    precisión de punto flotante. Conviértelos con una librería decimal
+    (`Decimal.js`, `big.js`, etc.), nunca con `parseFloat`.
+
+    ## Paginación
+    Todo endpoint de listado devuelve el mismo sobre:
+    `{count, page, page_size, num_pages, results}`. `page_size` por
+    default es 20 y el máximo permitido es 100 (valores fuera de rango se
+    ajustan silenciosamente, no dan error).
+
+  contact:
+    name: NovaERP Backend
+
+servers:
+  - url: http://127.0.0.1:8000
+    description: Desarrollo local
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Login y contexto del usuario autenticado
+  - name: Inventario
+    description: Productos y almacenes
+  - name: Ventas
+    description: Clientes
+  - name: Compras
+    description: Proveedores
+
+paths:
+  # ============================================================ AUTH
+  /api/auth/login/:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      description: |
+        Delega la validación de credenciales a la función de Postgres
+        `core.intentar_login`, que resuelve hash de password, bloqueo por
+        intentos fallidos y estado de la cuenta. Si el login es válido,
+        emite un JWT — **aunque el usuario tenga MFA habilitado**: el
+        flujo de OTP todavía no está implementado, así que el mensaje
+        puede decir "continuar con validación de OTP" pero el token ya
+        viene utilizable.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              tenant_slug: acme
+              correo: admin@acme.com
+              password: CambiarEnPrimerLogin!
+      responses:
+        '200':
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                mensaje: "OK, continuar con validación de OTP (MFA)"
+        '400':
+          description: JSON inválido o faltan campos obligatorios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginErrorMessage'
+              examples:
+                json_invalido:
+                  value: { mensaje: "JSON invalido." }
+                campos_faltantes:
+                  value: { mensaje: "tenant_slug, correo y password son obligatorios." }
+        '401':
+          description: |
+            Credenciales incorrectas, cuenta bloqueada o sin activar.
+            El mensaje exacto lo decide `core.intentar_login` y **nunca
+            revela si el tenant/correo existen** (misma respuesta para
+            "no existe" y "password incorrecta").
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginErrorMessage'
+              examples:
+                credenciales_incorrectas:
+                  value: { mensaje: "Credenciales incorrectas" }
+                cuenta_bloqueada:
+                  value: { mensaje: "Cuenta bloqueada, intente después de 2026-07-14 18:30:00" }
+                cuenta_sin_activar:
+                  value: { mensaje: "Active su cuenta primero" }
+
+  /api/core/me/:
+    get:
+      tags: [Auth]
+      summary: Contexto del usuario autenticado
+      description: |
+        Pensado para llamarse justo después del login: perfil, tenant,
+        roles activos, permisos derivados de esos roles (vía
+        `rol_permiso`) y módulos habilitados para el tenant (para armar
+        el menú lateral). Resuelve al usuario cruzando `usuario_id` **y**
+        `tenant_slug` del JWT a la vez, así que un token con un tenant que
+        ya no corresponde a ese usuario cae en 401, no en datos de otro
+        tenant.
+      responses:
+        '200':
+          description: Contexto completo del usuario
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ============================================================ PRODUCTOS
+  /api/inventario/productos/:
+    get:
+      tags: [Inventario]
+      summary: Listar / buscar productos
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: search
+          in: query
+          description: Coincidencia parcial (icontains) sobre `sku` o `nombre`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActivoParam'
+      responses:
+        '200':
+          description: Página de productos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProductos'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Inventario]
+      summary: Crear producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductoCreate'
+            example:
+              sku: LAP-002
+              nombre: Laptop 15"
+              descripcion: Equipo de prueba
+              costo_referencia: "9000"
+              precio_venta: "13500"
+              stock_minimo: "5"
+      responses:
+        '201':
+          description: Producto creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Producto' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+              examples:
+                sku_duplicado:
+                  value: { detail: "SKU ya existe en este tenant.", campo: "sku" }
+                sku_obligatorio:
+                  value: { detail: "sku es obligatorio.", campo: "sku" }
+                nombre_obligatorio:
+                  value: { detail: "nombre es obligatorio.", campo: "nombre" }
+                precio_negativo:
+                  value: { detail: "precio_venta debe ser >= 0.", campo: "precio_venta" }
+                costo_negativo:
+                  value: { detail: "costo_referencia debe ser >= 0.", campo: "costo_referencia" }
+
+  /api/inventario/productos/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/PkParam'
+    patch:
+      tags: [Inventario]
+      summary: Editar producto (parcial)
+      description: Manda solo los campos que quieras cambiar; el resto se conserva.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductoUpdate'
+            example:
+              precio_venta: "15000"
+      responses:
+        '200':
+          description: Producto actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Producto' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Regla de negocio violada (mismos casos que en POST)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+    delete:
+      tags: [Inventario]
+      summary: Dar de baja (baja lógica)
+      description: |
+        Nunca borra el registro: pone `activo=false`. El producto deja de
+        aparecer con `?activo=true` pero conserva su historial.
+      responses:
+        '200':
+          description: Producto desactivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BajaResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================ ALMACENES
+  /api/inventario/almacenes/:
+    get:
+      tags: [Inventario]
+      summary: Listar / buscar almacenes
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: search
+          in: query
+          description: Coincidencia parcial (icontains) sobre `nombre`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActivoParam'
+      responses:
+        '200':
+          description: Página de almacenes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedAlmacenes' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Inventario]
+      summary: Crear almacén
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlmacenCreate' }
+            example:
+              nombre: Almacén Central
+              ubicacion: Planta Baja
+      responses:
+        '201':
+          description: Almacén creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Almacen' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+              examples:
+                nombre_duplicado:
+                  value: { detail: "Ya existe un almacen con ese nombre en este tenant.", campo: "nombre" }
+                nombre_obligatorio:
+                  value: { detail: "nombre es obligatorio.", campo: "nombre" }
+
+  /api/inventario/almacenes/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/PkParam'
+    patch:
+      tags: [Inventario]
+      summary: Editar almacén (parcial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlmacenUpdate' }
+            example:
+              ubicacion: Segundo Piso
+      responses:
+        '200':
+          description: Almacén actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Almacen' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Regla de negocio violada (mismos casos que en POST)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+    delete:
+      tags: [Inventario]
+      summary: Dar de baja (baja lógica)
+      responses:
+        '200':
+          description: Almacén desactivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BajaResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================ CLIENTES
+  /api/ventas/clientes/:
+    get:
+      tags: [Ventas]
+      summary: Listar / buscar clientes
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: search
+          in: query
+          description: Coincidencia parcial (icontains) sobre `razon_social` o `rfc_o_id_fiscal`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActivoParam'
+      responses:
+        '200':
+          description: Página de clientes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedClientes' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Ventas]
+      summary: Crear cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClienteCreate' }
+            example:
+              rfc_o_id_fiscal: XAXX010101000
+              razon_social: Cliente de Prueba SA
+              correo: pagos@cliente.com
+              telefono: "5555555555"
+              limite_credito: "10000"
+      responses:
+        '201':
+          description: Cliente creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cliente' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+              examples:
+                rfc_duplicado:
+                  value: { detail: "RFC ya registrado en este tenant.", campo: "rfc_o_id_fiscal" }
+                razon_social_obligatoria:
+                  value: { detail: "razon_social es obligatorio.", campo: "razon_social" }
+                limite_negativo:
+                  value: { detail: "limite_credito debe ser >= 0.", campo: "limite_credito" }
+
+  /api/ventas/clientes/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/PkParam'
+    patch:
+      tags: [Ventas]
+      summary: Editar cliente (parcial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClienteUpdate' }
+            example:
+              telefono: "2222222222"
+      responses:
+        '200':
+          description: Cliente actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cliente' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Regla de negocio violada (mismos casos que en POST)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+    delete:
+      tags: [Ventas]
+      summary: Dar de baja (baja lógica) con guarda de saldo pendiente
+      description: |
+        Antes de desactivar, suma el `saldo` de todas las cuentas por
+        cobrar del cliente (`finanzas.cuenta_por_cobrar`). Si es mayor a
+        cero, **rechaza la baja con 422** y devuelve el saldo pendiente
+        para que el frontend lo muestre.
+      responses:
+        '200':
+          description: Cliente desactivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BajaResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: El cliente tiene saldo pendiente en CxC
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+              example:
+                detail: "Cliente con saldo pendiente en CxC; no puede darse de baja."
+                saldo_pendiente: "1234.56"
+
+  # ============================================================ PROVEEDORES
+  /api/compras/proveedores/:
+    get:
+      tags: [Compras]
+      summary: Listar / buscar proveedores
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/PageSizeParam'
+        - name: search
+          in: query
+          description: Coincidencia parcial (icontains) sobre `razon_social` o `rfc_o_id_fiscal`.
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActivoParam'
+      responses:
+        '200':
+          description: Página de proveedores
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedProveedores' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Compras]
+      summary: Crear proveedor
+      description: |
+        A diferencia de Cliente, `rfc_o_id_fiscal` es **obligatorio**
+        (la tabla lo define `NOT NULL`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorCreate' }
+            example:
+              rfc_o_id_fiscal: AAA010101AAA
+              razon_social: Proveedor de Prueba SA
+              correo: compras@proveedor.com
+              telefono: "7777777777"
+      responses:
+        '201':
+          description: Proveedor creado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          description: Regla de negocio violada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+              examples:
+                rfc_duplicado:
+                  value: { detail: "RFC ya registrado en este tenant.", campo: "rfc_o_id_fiscal" }
+                rfc_obligatorio:
+                  value: { detail: "rfc_o_id_fiscal es obligatorio.", campo: "rfc_o_id_fiscal" }
+                razon_social_obligatoria:
+                  value: { detail: "razon_social es obligatorio.", campo: "razon_social" }
+
+  /api/compras/proveedores/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/PkParam'
+    patch:
+      tags: [Compras]
+      summary: Editar proveedor (parcial)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorUpdate' }
+            example:
+              telefono: "9999999999"
+      responses:
+        '200':
+          description: Proveedor actualizado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Regla de negocio violada (mismos casos que en POST)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BusinessRuleError' }
+    delete:
+      tags: [Compras]
+      summary: Dar de baja (baja lógica)
+      responses:
+        '200':
+          description: Proveedor desactivado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BajaResponse' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Token devuelto por `POST /api/auth/login/`. Payload:
+        `{usuario_id, tenant_slug, exp}`. Expira en 8 horas.
+
+  parameters:
+    PkParam:
+      name: id
+      in: path
+      required: true
+      description: UUID del registro. Un id malformado responde 404 (no 400).
+      schema: { type: string, format: uuid }
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, default: 1, minimum: 1 }
+      description: Se ajusta silenciosamente a [1, num_pages] si viene fuera de rango.
+    PageSizeParam:
+      name: page_size
+      in: query
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      description: Se ajusta silenciosamente a [1, 100] si viene fuera de rango.
+    ActivoParam:
+      name: activo
+      in: query
+      description: |
+        Filtra por estado. Se considera "true" (insensible a mayúsculas)
+        cualquiera de: `1`, `true`, `si`, `sí`. Cualquier otro valor
+        presente (incluido `false` o vacío) se trata como `false`. Si el
+        parámetro no se manda, no filtra.
+      schema: { type: string, example: "true" }
+
+  responses:
+    BadRequest:
+      description: JSON inválido en el body
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DetailError' }
+          example: { detail: "JSON invalido." }
+    Unauthorized:
+      description: Sin token, token inválido/expirado, o el JWT ya no corresponde a un usuario/tenant real
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DetailError' }
+          example: { detail: "No autorizado o sesion expirada" }
+    NotFound:
+      description: No existe (o no pertenece al tenant del JWT — se responde igual para no filtrar existencia entre tenants)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/DetailError' }
+          example: { detail: "No encontrado" }
+
+  schemas:
+    # -------------------------------------------------------------- errores
+    DetailError:
+      type: object
+      properties:
+        detail: { type: string }
+      required: [detail]
+
+    LoginErrorMessage:
+      type: object
+      description: Forma de error específica de /api/auth/login/ (clave `mensaje`, no `detail`).
+      properties:
+        mensaje: { type: string }
+      required: [mensaje]
+
+    BusinessRuleError:
+      type: object
+      description: |
+        422 — violación de una regla de negocio. `campo` señala el campo
+        del formulario en conflicto (puede no venir); campos extra como
+        `saldo_pendiente` aparecen solo en reglas específicas.
+      properties:
+        detail: { type: string }
+        campo: { type: string }
+      required: [detail]
+      additionalProperties: true
+
+    # -------------------------------------------------------------- auth
+    LoginRequest:
+      type: object
+      properties:
+        tenant_slug: { type: string, example: acme }
+        correo: { type: string, format: email, example: admin@acme.com }
+        password: { type: string, format: password }
+      required: [tenant_slug, correo, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        token: { type: string, description: "JWT firmado HS256, vigente 8 horas." }
+        mensaje: { type: string }
+      required: [token, mensaje]
+
+    MeResponse:
+      type: object
+      properties:
+        usuario:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            nombre_completo: { type: string }
+            correo: { type: string, format: email }
+            estado:
+              type: string
+              enum: [pendiente, activo, suspendido, pendiente_verificacion]
+            mfa_enrolado: { type: boolean }
+        tenant:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            slug: { type: string }
+            razon_social: { type: string }
+            estado:
+              type: string
+              enum: [activo, suspendido, baja_logica]
+            plan: { type: string, description: "Código del plan comercial", example: BUSINESS }
+        roles:
+          type: array
+          items: { type: string }
+          description: Nombres de los roles activos del usuario en este tenant.
+        permisos:
+          type: array
+          description: |
+            Derivados de los roles activos vía `rol_permiso`. Puede venir
+            vacío aunque el usuario tenga roles, si `rol_permiso` no está
+            poblado todavía para ese rol.
+          items:
+            type: object
+            properties:
+              codigo: { type: string }
+              dominio: { type: string }
+              recurso: { type: string }
+              accion: { type: string }
+        modulos:
+          type: array
+          description: Módulos habilitados para el tenant (activo=true) — úsalo para armar el menú lateral.
+          items:
+            type: object
+            properties:
+              codigo: { type: string, example: INVENTARIO }
+              nombre: { type: string, example: Inventario }
+              fase: { type: integer, example: 1 }
+
+    # -------------------------------------------------------------- paginacion (generica)
+    PaginationEnvelope:
+      type: object
+      properties:
+        count: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        num_pages: { type: integer }
+      required: [count, page, page_size, num_pages, results]
+
+    # -------------------------------------------------------------- producto
+    Producto:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sku: { type: string }
+        nombre: { type: string }
+        descripcion: { type: string, nullable: true }
+        costo_referencia: { type: string, description: "Decimal como string", example: "9000.0000" }
+        precio_venta: { type: string, description: "Decimal como string", example: "13500.0000" }
+        stock_minimo: { type: string, description: "Decimal como string", example: "5.000" }
+        activo: { type: boolean }
+      required: [id, sku, nombre, costo_referencia, precio_venta, stock_minimo, activo]
+
+    ProductoCreate:
+      type: object
+      properties:
+        sku: { type: string }
+        nombre: { type: string }
+        descripcion: { type: string, nullable: true }
+        costo_referencia: { type: string, default: "0" }
+        precio_venta: { type: string, default: "0" }
+        stock_minimo: { type: string, default: "0" }
+      required: [sku, nombre]
+
+    ProductoUpdate:
+      type: object
+      description: Todos los campos son opcionales; solo se actualiza lo que se manda.
+      properties:
+        sku: { type: string }
+        nombre: { type: string }
+        descripcion: { type: string, nullable: true }
+        costo_referencia: { type: string }
+        precio_venta: { type: string }
+        stock_minimo: { type: string }
+
+    PaginatedProductos:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Producto' }
+
+    # -------------------------------------------------------------- almacen
+    Almacen:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nombre: { type: string }
+        ubicacion: { type: string, nullable: true }
+        activo: { type: boolean }
+      required: [id, nombre, activo]
+
+    AlmacenCreate:
+      type: object
+      properties:
+        nombre: { type: string }
+        ubicacion: { type: string, nullable: true }
+      required: [nombre]
+
+    AlmacenUpdate:
+      type: object
+      properties:
+        nombre: { type: string }
+        ubicacion: { type: string, nullable: true }
+
+    PaginatedAlmacenes:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Almacen' }
+
+    # -------------------------------------------------------------- cliente
+    Cliente:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        rfc_o_id_fiscal: { type: string, nullable: true }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+        limite_credito: { type: string, description: "Decimal como string", example: "10000.00" }
+        activo: { type: boolean }
+      required: [id, razon_social, limite_credito, activo]
+
+    ClienteCreate:
+      type: object
+      properties:
+        rfc_o_id_fiscal: { type: string, nullable: true }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+        limite_credito: { type: string, default: "0" }
+      required: [razon_social]
+
+    ClienteUpdate:
+      type: object
+      properties:
+        rfc_o_id_fiscal: { type: string, nullable: true }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+        limite_credito: { type: string }
+
+    PaginatedClientes:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Cliente' }
+
+    # -------------------------------------------------------------- proveedor
+    Proveedor:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        rfc_o_id_fiscal: { type: string, description: "Obligatorio (NOT NULL en DB), a diferencia de Cliente." }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+        activo: { type: boolean }
+      required: [id, rfc_o_id_fiscal, razon_social, activo]
+
+    ProveedorCreate:
+      type: object
+      properties:
+        rfc_o_id_fiscal: { type: string }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+      required: [rfc_o_id_fiscal, razon_social]
+
+    ProveedorUpdate:
+      type: object
+      properties:
+        rfc_o_id_fiscal: { type: string }
+        razon_social: { type: string }
+        correo: { type: string, format: email, nullable: true }
+        telefono: { type: string, nullable: true }
+
+    PaginatedProveedores:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          properties:
+            results:
+              type: array
+              items: { $ref: '#/components/schemas/Proveedor' }
+
+    # -------------------------------------------------------------- comun
+    BajaResponse:
+      type: object
+      description: Respuesta de todo DELETE (baja lógica, nunca borra el registro).
+      properties:
+        id: { type: string, format: uuid }
+        activo: { type: boolean, enum: [false] }
+      required: [id, activo]

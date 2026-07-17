@@ -6,6 +6,17 @@
 -- Basado en ERS_NovaERP_IEEE830 (RF-01 a RF-25, RNF-01 a RNF-19)
 -- ============================================================================
 
+DROP SCHEMA IF EXISTS bi CASCADE;
+DROP SCHEMA IF EXISTS reglas CASCADE;
+DROP SCHEMA IF EXISTS bpm CASCADE;
+DROP SCHEMA IF EXISTS proyectos CASCADE;
+DROP SCHEMA IF EXISTS finanzas CASCADE;
+DROP SCHEMA IF EXISTS rrhh CASCADE;
+DROP SCHEMA IF EXISTS inventario CASCADE;
+DROP SCHEMA IF EXISTS compras CASCADE;
+DROP SCHEMA IF EXISTS ventas CASCADE;
+DROP SCHEMA IF EXISTS core CASCADE;
+
 -- ----------------------------------------------------------------------------
 -- 0. EXTENSIONES Y CONFIGURACIÓN GENERAL
 -- ----------------------------------------------------------------------------
@@ -878,7 +889,7 @@ BEGIN
     EXECUTE format(
       'CREATE POLICY tenant_isolation ON %I.%I
          USING (core.is_sysadmin() OR tenant_id = core.current_tenant_id())
-         WITH CHECK (tenant_id = core.current_tenant_id());',
+         WITH CHECK (core.is_sysadmin() OR tenant_id = core.current_tenant_id());',
       tabla.table_schema, tabla.table_name
     );
   END LOOP;
@@ -1399,6 +1410,8 @@ INSERT INTO core.permiso (dominio, recurso, accion, descripcion) VALUES
 -- ----------------------------------------------------------------------------
 -- 2) SEED: un tenant de ejemplo con su TENANT_ADMIN
 -- ----------------------------------------------------------------------------
+SET app.is_sysadmin = 'true';
+
 WITH nuevo_tenant AS (
   INSERT INTO core.tenant (slug, razon_social, dominio_comercial, plan_id, estado)
   SELECT 'acme', 'ACME Corp S.A. de C.V.', 'Manufactura', id, 'activo'
@@ -1444,7 +1457,7 @@ WHERE t.slug = 'acme' AND m.fase IN (0,1);
 --   -- ... consultas/DML normales, ya filtradas automáticamente por RLS ...
 -- COMMIT;
 
--- Ejemplo funcional real usando el tenant sembrado arriba:
+-- Establece contexto de tenant para el resto del script (session-level)
 DO $$
 DECLARE
   v_tenant_id UUID;
@@ -1453,9 +1466,9 @@ BEGIN
   SELECT id INTO v_tenant_id FROM core.tenant WHERE slug = 'acme';
   SELECT id INTO v_user_id FROM core.usuario WHERE correo = 'admin@acme.com';
 
-  PERFORM set_config('app.current_tenant_id', v_tenant_id::TEXT, true);
-  PERFORM set_config('app.current_user_id', v_user_id::TEXT, true);
-  PERFORM set_config('app.is_sysadmin', 'false', true);
+  PERFORM set_config('app.current_tenant_id', v_tenant_id::TEXT, false);
+  PERFORM set_config('app.current_user_id', v_user_id::TEXT, false);
+  -- is_sysadmin se resetea al final, después de todos los ejemplos de seed
 END $$;
 
 -- ----------------------------------------------------------------------------
@@ -1600,6 +1613,8 @@ dash AS (
 )
 INSERT INTO bi.dashboard_indicador (dashboard_id, indicador_id)
 SELECT dash.id, ind.id FROM dash, ind;
+
+SET app.is_sysadmin = 'false';
 
 -- Consulta final que consumiría el frontend para pintar el widget:
 -- SELECT * FROM ventas.v_pipeline_oportunidades WHERE tenant_id = core.current_tenant_id();

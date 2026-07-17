@@ -8,11 +8,31 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from core.models import Tenant
-from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, tenant_scoped
+from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, get_tenant, tenant_scoped
 from core.utils.errors import BusinessRuleError
 from core.utils.pagination import paginate
 
 TRUE_VALUES = {"1", "true", "si", "sí"}
+
+
+def _apply_filters(qs, request, filter_fields, date_field):
+    """Filtros exactos ?<campo>=valor por cada entrada de filter_fields, mas
+    un rango ?desde=&hasta= sobre date_field si esta definido. Compartido
+    entre ListCreateView y ReadOnlyListView."""
+    for field in filter_fields:
+        value = request.GET.get(field)
+        if value:
+            qs = qs.filter(**{field: value})
+
+    if date_field:
+        desde = request.GET.get("desde")
+        hasta = request.GET.get("hasta")
+        if desde:
+            qs = qs.filter(**{f"{date_field}__gte": desde})
+        if hasta:
+            qs = qs.filter(**{f"{date_field}__lte": hasta})
+
+    return qs
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -110,3 +130,77 @@ class CatalogDetailView(LoginRequiredMixin, View):
             return JsonResponse(e.to_dict(), status=422)
 
         return JsonResponse({"id": str(obj.pk), "activo": obj.activo})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ListCreateView(LoginRequiredMixin, View):
+    """Base reutilizable para GET (lista paginada + filtros exactos) y POST
+    (alta) de registros transaccionales acotados al tenant (movimientos,
+    ajustes, transferencias, etc). A diferencia de CatalogListCreateView no
+    asume busqueda de texto libre ni ?activo=; en su lugar usa
+    filter_fields (igualdad exacta) y, opcionalmente, date_field para un
+    rango ?desde=&hasta=:
+
+        class AjusteListCreateView(ListCreateView):
+            model = AjusteInventario
+            serialize_fn = staticmethod(svc.serialize_ajuste)
+            create_fn = staticmethod(svc.crear_ajuste)
+            filter_fields = ("producto_id", "almacen_id")
+            date_field = "created_at"
+    """
+
+    model = None
+    ordering = ("-id",)
+    serialize_fn = None
+    create_fn = None
+    filter_fields = ()
+    date_field = None
+
+    def get(self, request):
+        qs = tenant_scoped(self.model.objects.all(), request).order_by(*self.ordering)
+        qs = _apply_filters(qs, request, self.filter_fields, self.date_field)
+        return JsonResponse(paginate(qs, request, self.serialize_fn))
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "JSON invalido."}, status=400)
+
+        try:
+            obj = self.create_fn(data, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+        return JsonResponse(self.serialize_fn(obj), status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ReadOnlyListView(LoginRequiredMixin, View):
+    """Base reutilizable para GET sobre modelos de solo lectura (vistas SQL
+    como VKardex/VStockDisponible) o catalogos sin alta via API. Las vistas
+    SQL de reportes exponen tenant_id crudo (no una FK `tenant`), asi que
+    tenant_via_id=True filtra por id en vez de tenant_scoped (que espera
+    `tenant__slug`)."""
+
+    model = None
+    ordering = ("-id",)
+    serialize_fn = None
+    filter_fields = ()
+    date_field = None
+    tenant_via_id = False
+
+    def get(self, request):
+        try:
+            if self.tenant_via_id:
+                qs = self.model.objects.filter(tenant_id=get_tenant(request).id)
+            else:
+                qs = tenant_scoped(self.model.objects.all(), request)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+        qs = qs.order_by(*self.ordering)
+        qs = _apply_filters(qs, request, self.filter_fields, self.date_field)
+        return JsonResponse(paginate(qs, request, self.serialize_fn))

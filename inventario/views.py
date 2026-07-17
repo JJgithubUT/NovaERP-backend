@@ -1,33 +1,154 @@
-from core.utils.views import CatalogDetailView, CatalogListCreateView
-from inventario.models import Almacen, Producto
-from inventario.services import catalogo_service as svc
+from django.http import JsonResponse
+from django.utils.decorators import method_decorator
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+
+from core.utils.auth import LoginRequiredMixin, tenant_scoped
+from core.utils.pagination import paginate
+from core.utils.views import (
+    TRUE_VALUES,
+    CatalogDetailView,
+    CatalogListCreateView,
+    ListCreateView,
+    ReadOnlyListView,
+)
+from inventario.models import (
+    AjusteInventario,
+    Almacen,
+    AlertaStockMinimo,
+    Movimiento,
+    Producto,
+    Transferencia,
+    VKardex,
+    VStockDisponible,
+    VValuacionInventario,
+)
+from inventario.services import catalogo_service as catalogo_svc
+from inventario.services import consulta_service as consulta_svc
+from inventario.services import movimiento_service as mov_svc
 
 
 class ProductoListCreateView(CatalogListCreateView):
     model = Producto
     search_fields = ("sku", "nombre")
     ordering = ("sku",)
-    serialize_fn = staticmethod(svc.serialize_producto)
-    create_fn = staticmethod(svc.crear_producto)
+    serialize_fn = staticmethod(catalogo_svc.serialize_producto)
+    create_fn = staticmethod(catalogo_svc.crear_producto)
 
 
 class ProductoDetailView(CatalogDetailView):
     model = Producto
-    serialize_fn = staticmethod(svc.serialize_producto)
-    edit_fn = staticmethod(svc.editar_producto)
-    deactivate_fn = staticmethod(svc.dar_de_baja_producto)
+    serialize_fn = staticmethod(catalogo_svc.serialize_producto)
+    edit_fn = staticmethod(catalogo_svc.editar_producto)
+    deactivate_fn = staticmethod(catalogo_svc.dar_de_baja_producto)
 
 
 class AlmacenListCreateView(CatalogListCreateView):
     model = Almacen
     search_fields = ("nombre",)
     ordering = ("nombre",)
-    serialize_fn = staticmethod(svc.serialize_almacen)
-    create_fn = staticmethod(svc.crear_almacen)
+    serialize_fn = staticmethod(catalogo_svc.serialize_almacen)
+    create_fn = staticmethod(catalogo_svc.crear_almacen)
 
 
 class AlmacenDetailView(CatalogDetailView):
     model = Almacen
-    serialize_fn = staticmethod(svc.serialize_almacen)
-    edit_fn = staticmethod(svc.editar_almacen)
-    deactivate_fn = staticmethod(svc.dar_de_baja_almacen)
+    serialize_fn = staticmethod(catalogo_svc.serialize_almacen)
+    edit_fn = staticmethod(catalogo_svc.editar_almacen)
+    deactivate_fn = staticmethod(catalogo_svc.dar_de_baja_almacen)
+
+
+# ---------------------------------------------------------------- RF-58
+
+class MovimientoListCreateView(ListCreateView):
+    model = Movimiento
+    ordering = ("-ocurrido_en", "-id")
+    serialize_fn = staticmethod(mov_svc.serialize_movimiento)
+    create_fn = staticmethod(mov_svc.crear_movimiento_manual)
+    filter_fields = ("producto_id", "almacen_id", "tipo")
+    date_field = "ocurrido_en"
+
+
+# ---------------------------------------------------------------- RF-59
+
+class StockDisponibleListView(ReadOnlyListView):
+    model = VStockDisponible
+    ordering = ("producto", "almacen")
+    serialize_fn = staticmethod(consulta_svc.serialize_stock_disponible)
+    tenant_via_id = True
+
+
+# ---------------------------------------------------------------- RF-60
+
+class AjusteListCreateView(ListCreateView):
+    model = AjusteInventario
+    ordering = ("-created_at",)
+    serialize_fn = staticmethod(mov_svc.serialize_ajuste)
+    create_fn = staticmethod(mov_svc.crear_ajuste)
+    filter_fields = ("producto_id", "almacen_id")
+    date_field = "created_at"
+
+
+# ---------------------------------------------------------------- RF-61
+
+class TransferenciaListCreateView(ListCreateView):
+    model = Transferencia
+    ordering = ("-created_at",)
+    serialize_fn = staticmethod(mov_svc.serialize_transferencia)
+    create_fn = staticmethod(mov_svc.crear_transferencia)
+    filter_fields = ("producto_id", "almacen_origen_id", "almacen_destino_id")
+    date_field = "created_at"
+
+
+# ---------------------------------------------------------------- RF-62
+
+class KardexListView(ReadOnlyListView):
+    model = VKardex
+    ordering = ("-ocurrido_en", "-movimiento_id")
+    serialize_fn = staticmethod(consulta_svc.serialize_kardex)
+    filter_fields = ("sku", "almacen", "tipo")
+    date_field = "ocurrido_en"
+    tenant_via_id = True
+
+
+# ---------------------------------------------------------------- RF-63
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AlertaStockMinimoListView(LoginRequiredMixin, View):
+    def get(self, request):
+        qs = tenant_scoped(AlertaStockMinimo.objects.all(), request).order_by("-disparada_en")
+
+        producto_id = request.GET.get("producto_id")
+        if producto_id:
+            qs = qs.filter(producto_id=producto_id)
+
+        almacen_id = request.GET.get("almacen_id")
+        if almacen_id:
+            qs = qs.filter(almacen_id=almacen_id)
+
+        notificada = request.GET.get("notificada")
+        if notificada is not None:
+            qs = qs.filter(notificada=notificada.strip().lower() in TRUE_VALUES)
+
+        return JsonResponse(paginate(qs, request, consulta_svc.serialize_alerta))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AlertaStockMinimoAckView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        try:
+            alerta = tenant_scoped(AlertaStockMinimo.objects.all(), request).get(pk=pk)
+        except (AlertaStockMinimo.DoesNotExist, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+
+        alerta = consulta_svc.marcar_alerta_notificada(alerta, request)
+        return JsonResponse(consulta_svc.serialize_alerta(alerta))
+
+
+# ---------------------------------------------------------------- RF-64
+
+class ValuacionInventarioListView(ReadOnlyListView):
+    model = VValuacionInventario
+    ordering = ("producto", "almacen")
+    serialize_fn = staticmethod(consulta_svc.serialize_valuacion)
+    tenant_via_id = True

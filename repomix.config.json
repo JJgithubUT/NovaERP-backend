@@ -12,7 +12,8 @@
     "rrhh/**/*",
     "ventas/**/*",
     "manage.py",
-    "requirements.txt"
+    "requirements.txt",
+    "manage.py"
   ],
   "ignore": {
     "custom_patterns": [

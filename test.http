@@ -566,6 +566,300 @@ Authorization: Bearer {{token}}
 ###
 
 ###########################################################
+# COMPRAS - ORDENES, RECEPCIONES, CxP, HISTORIAL (RF-47 a RF-52)
+###########################################################
+
+# Proveedor, producto y almacen propios para este bloque (el proveedorId
+# de mas arriba ya quedo inactivo por el DELETE de la seccion PROVEEDORES).
+POST {{host}}/api/compras/proveedores/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "rfc_o_id_fiscal":"RFC-OC-{{$guid}}",
+    "razon_social":"Proveedor Ordenes de Compra",
+    "correo":"oc@test.com"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocProveedorId", body.id);
+%}
+
+###
+
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "sku":"OC-{{$guid}}",
+    "nombre":"Producto para ordenes de compra",
+    "costo_referencia":"10",
+    "precio_venta":"20",
+    "stock_minimo":"1"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocProductoId", body.id);
+%}
+
+###
+
+POST {{host}}/api/inventario/almacenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"Almacen Compras {{$guid}}"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocAlmacenId", body.id);
+%}
+
+###########################################################
+# CONFIGURACION DE UMBRAL DE APROBACION (RF-52)
+###########################################################
+
+GET {{host}}/api/compras/config-aprobacion/
+Authorization: Bearer {{token}}
+
+###
+
+PUT {{host}}/api/compras/config-aprobacion/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "umbral_monto":"500"
+}
+
+###
+
+# umbral negativo -> debe responder 422 con campo:"umbral_monto"
+PUT {{host}}/api/compras/config-aprobacion/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "umbral_monto":"-1"
+}
+
+###########################################################
+# ORDENES DE COMPRA (RF-47, RF-48)
+###########################################################
+
+# Total 100, dentro del umbral (500) -> estado "enviada"
+POST {{host}}/api/compras/ordenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "proveedor_id":"{{ocProveedorId}}",
+    "lineas":[
+        {"producto_id":"{{ocProductoId}}", "cantidad":"10", "costo_unitario":"10"}
+    ]
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocOrdenId", body.id);
+client.global.set("ocLineaId", body.lineas[0].id);
+%}
+
+###
+
+# Total 10000, excede el umbral -> estado "pendiente_aprobacion"
+POST {{host}}/api/compras/ordenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "proveedor_id":"{{ocProveedorId}}",
+    "lineas":[
+        {"producto_id":"{{ocProductoId}}", "cantidad":"1000", "costo_unitario":"10"}
+    ]
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocOrdenPendienteId", body.id);
+%}
+
+###
+
+# sin lineas -> debe responder 422 con campo:"lineas"
+POST {{host}}/api/compras/ordenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "proveedor_id":"{{ocProveedorId}}",
+    "lineas":[]
+}
+
+###
+
+GET {{host}}/api/compras/ordenes/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/compras/ordenes/?estado=pendiente_aprobacion
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/compras/ordenes/{{ocOrdenId}}/
+Authorization: Bearer {{token}}
+
+###
+
+# aprobacion manual (stand-in del motor de aprobaciones, aun no implementado):
+# pendiente_aprobacion -> enviada
+PATCH {{host}}/api/compras/ordenes/{{ocOrdenPendienteId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "estado":"enviada"
+}
+
+###
+
+# transicion de estado no permitida -> debe responder 422 con campo:"estado"
+PATCH {{host}}/api/compras/ordenes/{{ocOrdenPendienteId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "estado":"recibida_total"
+}
+
+###########################################################
+# RECEPCION DE MERCANCIA (RF-49) Y CUENTA POR PAGAR (RF-50)
+###########################################################
+
+# Recepcion parcial: 6 de 10 -> orden pasa a "recibida_parcial"
+POST {{host}}/api/compras/recepciones/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "orden_id":"{{ocOrdenId}}",
+    "almacen_id":"{{ocAlmacenId}}",
+    "lineas":[
+        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"6", "costo_unitario":"11"}
+    ]
+}
+
+###
+
+# excede la cantidad pendiente (quedan 4) -> debe responder 422 con campo:"lineas[0].cantidad"
+POST {{host}}/api/compras/recepciones/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "orden_id":"{{ocOrdenId}}",
+    "almacen_id":"{{ocAlmacenId}}",
+    "lineas":[
+        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"5", "costo_unitario":"11"}
+    ]
+}
+
+###
+
+# recibe el remanente (4) -> orden pasa a "recibida_total"
+POST {{host}}/api/compras/recepciones/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "orden_id":"{{ocOrdenId}}",
+    "almacen_id":"{{ocAlmacenId}}",
+    "lineas":[
+        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"4", "costo_unitario":"11"}
+    ]
+}
+
+###
+
+GET {{host}}/api/compras/ordenes/{{ocOrdenId}}/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/compras/recepciones/?orden_id={{ocOrdenId}}
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/compras/cuentas-por-pagar/?proveedor_id={{ocProveedorId}}
+Authorization: Bearer {{token}}
+
+###
+
+# el stock disponible del producto debe reflejar las dos recepciones (10 en total)
+GET {{host}}/api/inventario/stock-disponible/?producto_id={{ocProductoId}}
+Authorization: Bearer {{token}}
+
+###########################################################
+# CANCELAR ORDEN DE COMPRA (RF-48)
+###########################################################
+
+# orden ya recibida_total -> no puede cancelarse, debe responder 422
+POST {{host}}/api/compras/ordenes/{{ocOrdenId}}/cancelar/
+Authorization: Bearer {{token}}
+
+###
+
+# orden nueva sin recepciones, se puede cancelar en su totalidad
+POST {{host}}/api/compras/ordenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "proveedor_id":"{{ocProveedorId}}",
+    "lineas":[
+        {"producto_id":"{{ocProductoId}}", "cantidad":"5", "costo_unitario":"1"}
+    ]
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("ocOrdenCancelarId", body.id);
+%}
+
+###
+
+POST {{host}}/api/compras/ordenes/{{ocOrdenCancelarId}}/cancelar/
+Authorization: Bearer {{token}}
+
+###
+
+# orden ya cancelada -> no puede editarse, debe responder 422
+PATCH {{host}}/api/compras/ordenes/{{ocOrdenCancelarId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "estado":"enviada"
+}
+
+###########################################################
+# HISTORIAL DE COMPRAS POR PROVEEDOR (RF-51)
+###########################################################
+
+GET {{host}}/api/compras/proveedores/{{ocProveedorId}}/historial/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
 # PRUEBAS DE SEGURIDAD
 ###########################################################
 

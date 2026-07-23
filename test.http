@@ -279,6 +279,293 @@ Authorization: Bearer {{token}}
 ###
 
 ###########################################################
+# MOVIMIENTOS DE INVENTARIO (RF-58) - Sprint 2
+###########################################################
+
+# Producto y almacen base para las pruebas de la capa transaccional
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "sku":"MOV-{{$guid}}",
+    "nombre":"Producto para movimientos",
+    "costo_referencia":"100",
+    "precio_venta":"150",
+    "stock_minimo":"10"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("movProductoId", body.id);
+%}
+
+###
+
+POST {{host}}/api/inventario/almacenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"Almacen Movimientos {{$guid}}",
+    "ubicacion":"Bodega 1"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("movAlmacenOrigenId", body.id);
+%}
+
+###
+
+POST {{host}}/api/inventario/almacenes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"Almacen Movimientos Destino {{$guid}}",
+    "ubicacion":"Bodega 2"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("movAlmacenDestinoId", body.id);
+%}
+
+###
+
+# Entrada manual: carga inicial de stock
+POST {{host}}/api/inventario/movimientos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "tipo":"entrada",
+    "cantidad":"50",
+    "costo_unitario":"100"
+}
+
+###
+
+# Salida manual
+POST {{host}}/api/inventario/movimientos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "tipo":"salida",
+    "cantidad":"5"
+}
+
+###
+
+# Salida que excede el stock disponible -> debe responder 422 con campo:"cantidad"
+POST {{host}}/api/inventario/movimientos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "tipo":"salida",
+    "cantidad":"99999"
+}
+
+###
+
+# tipo invalido -> debe responder 422 con campo:"tipo"
+POST {{host}}/api/inventario/movimientos/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "tipo":"ajuste_positivo",
+    "cantidad":"1"
+}
+
+###
+
+GET {{host}}/api/inventario/movimientos/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/movimientos/?producto_id={{movProductoId}}
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# STOCK DISPONIBLE (RF-59) - Sprint 2
+###########################################################
+
+GET {{host}}/api/inventario/stock-disponible/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/stock-disponible/?producto_id={{movProductoId}}
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# AJUSTES DE INVENTARIO (RF-60) - Sprint 2
+###########################################################
+
+# Ajuste positivo (conteo fisico encontro mas stock del esperado)
+POST {{host}}/api/inventario/ajustes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "motivo":"conteo_fisico",
+    "cantidad":"10"
+}
+
+###
+
+# Ajuste negativo (merma)
+POST {{host}}/api/inventario/ajustes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "motivo":"merma",
+    "cantidad":"-3"
+}
+
+###
+
+# motivo invalido -> debe responder 422 con campo:"motivo"
+POST {{host}}/api/inventario/ajustes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "motivo":"robo",
+    "cantidad":"-1"
+}
+
+###
+
+# cantidad cero -> debe responder 422 con campo:"cantidad"
+POST {{host}}/api/inventario/ajustes/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_id":"{{movAlmacenOrigenId}}",
+    "motivo":"otro",
+    "cantidad":"0"
+}
+
+###
+
+GET {{host}}/api/inventario/ajustes/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# TRANSFERENCIAS ENTRE ALMACENES (RF-61) - Sprint 2
+###########################################################
+
+POST {{host}}/api/inventario/transferencias/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_origen_id":"{{movAlmacenOrigenId}}",
+    "almacen_destino_id":"{{movAlmacenDestinoId}}",
+    "cantidad":"5"
+}
+
+###
+
+# Mismo almacen de origen y destino -> debe responder 422 con campo:"almacen_destino_id"
+POST {{host}}/api/inventario/transferencias/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "producto_id":"{{movProductoId}}",
+    "almacen_origen_id":"{{movAlmacenOrigenId}}",
+    "almacen_destino_id":"{{movAlmacenOrigenId}}",
+    "cantidad":"1"
+}
+
+###
+
+GET {{host}}/api/inventario/transferencias/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# KARDEX (RF-62) - Sprint 2
+###########################################################
+
+GET {{host}}/api/inventario/kardex/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/kardex/?sku={{productoSku}}
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# ALERTAS DE STOCK MINIMO (RF-63) - Sprint 2
+###########################################################
+
+GET {{host}}/api/inventario/alertas-stock-minimo/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/alertas-stock-minimo/?notificada=false
+Authorization: Bearer {{token}}
+
+###
+
+# Requiere que exista al menos una alerta disparada (stock <= stock_minimo);
+# reemplazar {{alertaId}} manualmente con el id devuelto por el GET anterior.
+# POST {{host}}/api/inventario/alertas-stock-minimo/{{alertaId}}/notificar/
+# Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# VALUACION DE INVENTARIO (RF-64) - Sprint 2
+###########################################################
+
+GET {{host}}/api/inventario/valuacion/
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/inventario/valuacion/?almacen_id={{movAlmacenOrigenId}}
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
 # PRUEBAS DE SEGURIDAD
 ###########################################################
 

@@ -208,7 +208,25 @@ def desactivar_rol(rol, request):
     """RF-13: baja logica de un rol personalizado. Nunca hay borrado fisico,
     asi que "eliminar" es desactivar; con usuarios asignados se bloquea y se
     exige confirmacion explicita (?desactivar=true), que es la alternativa que
-    la propia RN01 ofrece frente a reasignar a los usuarios."""
+    la propia RN01 ofrece frente a reasignar a los usuarios.
+
+    DESVIACION DELIBERADA DE LA ERS (RF-13/CA02)
+    --------------------------------------------
+    La CA02 afirma que, al desactivar un rol, los usuarios que ya lo tenian
+    "conservan sus permisos activos de forma inerte y pueden seguir operando
+    con normalidad". Aqui se implementa lo contrario: un rol inactivo no
+    concede ningun permiso (PermissionResolver filtra por r.activo).
+
+    Motivo: seguir la ERS al pie de la letra haria que desactivar un rol no
+    tuviera ningun efecto de seguridad y contradiria RF-12/RN01, que exige que
+    un cambio de permisos surta efecto en la siguiente peticion. Tambien
+    violaria el principio de menor privilegio: un usuario conservaria acceso
+    indefinidamente pese a que su rol fue dado de baja.
+
+    La CA02 sigue cumpliendose en su primera mitad: un rol inactivo no puede
+    asignarse a nuevos usuarios (ver asignar_roles) y su fila en usuario_rol
+    no se borra, de modo que la baja es reversible reactivando el rol.
+    """
     if rol.es_sistema:
         raise PermissionDeniedError(
             "core:roles:eliminar", detail=MSG_ROL_SISTEMA_ELIMINAR

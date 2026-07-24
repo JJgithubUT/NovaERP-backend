@@ -77,6 +77,7 @@ INSERT INTO core.permiso (dominio, recurso, accion, descripcion) VALUES
   ('core', 'usuarios',     'leer',      'RF-06 Consultar directorio de usuarios'),
   ('core', 'usuarios',     'editar',    'RF-07 Editar usuario'),
   ('core', 'usuarios',     'suspender', 'RF-08 Suspender o reactivar usuario'),
+  ('core', 'usuarios',     'reset_mfa', 'RF-07/RN07 Resetear el segundo factor (MFA) de un usuario'),
 
   ('core', 'roles',        'crear',     'RF-10 Registrar rol personalizado'),
   ('core', 'roles',        'leer',      'RF-11 Consultar catálogo de roles y permisos'),

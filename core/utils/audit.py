@@ -24,6 +24,19 @@ def client_ip(request):
     return request.META.get("REMOTE_ADDR") or ""
 
 
+def set_audit_user(usuario_id):
+    """Re-publica app.current_user_id dentro de una transaccion ya abierta por
+    audit_context. Lo necesita el login (RF-16): la transaccion se abre sin
+    usuario (aun no esta autenticado) para que las escrituras internas de
+    core.intentar_login hereden tenant e IP; una vez que la DB devuelve quien
+    es, se fija el actor para que la creacion de la sesion quede atribuida.
+    """
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT set_config(%s, %s, true)", [_GUC_USUARIO, str(usuario_id or "")]
+        )
+
+
 @contextmanager
 def audit_context(request, tenant_id=None, usuario_id=None):
     """Abre una transaccion y publica en ella el contexto que el trigger

@@ -168,6 +168,9 @@ class Usuario(models.Model):
     tenant = models.ForeignKey('core.Tenant', on_delete=models.DO_NOTHING, db_column='tenant_id', related_name='core_usuario_tenant_set')
     correo = models.EmailField(db_column='correo', max_length=255)  # citext en PostgreSQL: comparaciones case-insensitive resueltas por la DB
     nombre_completo = models.TextField(db_column='nombre_completo')
+    telefono = models.TextField(db_column='telefono', blank=True, null=True)
+    puesto = models.TextField(db_column='puesto', blank=True, null=True)
+    departamento = models.TextField(db_column='departamento', blank=True, null=True)
     password_hash = models.TextField(db_column='password_hash', blank=True, null=True)
     mfa_secret = models.TextField(db_column='mfa_secret', blank=True, null=True)
     mfa_enrolado = models.BooleanField(db_column='mfa_enrolado')

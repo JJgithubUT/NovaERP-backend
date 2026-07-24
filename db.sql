@@ -101,6 +101,9 @@ CREATE TABLE core.usuario (
   tenant_id           UUID NOT NULL REFERENCES core.tenant(id) ON DELETE CASCADE,
   correo              CITEXT NOT NULL,
   nombre_completo     TEXT NOT NULL,
+  telefono            TEXT,                        -- RF-07 (dato personal)
+  puesto              TEXT,                        -- RF-06/CA02 (busqueda del directorio)
+  departamento        TEXT,                        -- RF-06/CA03 (filtro del directorio)
   password_hash       TEXT,                        -- NULL hasta activación (RF-05 flujo)
   mfa_secret          TEXT,
   mfa_enrolado        BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1094,10 +1097,14 @@ CREATE TRIGGER trg_prevenir_delete_rol
 -- RF-16/RN02: bloqueo de cuenta tras 5 intentos fallidos en ventana de 15 min.
 -- Función que la capa de aplicación invoca en cada intento de login fallido.
 -- ----------------------------------------------------------------------------
+-- Devuelve el bloqueo resultante para que el servicio de autenticacion
+-- (RF-16) detecte en una sola llamada si este intento disparo el bloqueo.
+-- La invoca la capa de app, nunca core.intentar_login (validador puro).
 CREATE OR REPLACE FUNCTION core.registrar_intento_fallido(p_usuario_id UUID)
-RETURNS VOID AS $$
+RETURNS TIMESTAMPTZ AS $$
 DECLARE
-  v_config RECORD;
+  v_config  RECORD;
+  v_bloqueo TIMESTAMPTZ;
 BEGIN
   SELECT * INTO v_config FROM core.config_seguridad_tenant cst
     JOIN core.usuario u ON u.tenant_id = cst.tenant_id
@@ -1110,7 +1117,10 @@ BEGIN
              THEN now() + make_interval(mins => COALESCE(v_config.bloqueo_minutos, 30))
            ELSE bloqueado_hasta
          END
-   WHERE id = p_usuario_id;
+   WHERE id = p_usuario_id
+   RETURNING bloqueado_hasta INTO v_bloqueo;
+
+  RETURN v_bloqueo;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -1498,18 +1508,24 @@ WHERE c.folio = 'COT-0001' AND p.sku = 'SKU-001';
 -- WHERE disponible <= (SELECT stock_minimo FROM inventario.producto WHERE sku = inventario.v_stock_disponible.sku);
 
 -- ----------------------------------------------------------------------------
--- 7) EJEMPLO — RF-16: función de login que valida credenciales respetando
---    RN01 (hash), RN02 (bloqueo por intentos) y RN04 (mensaje genérico)
+-- 7) RF-16: VALIDADOR PURO de credenciales. Respeta RN01 (hash), reporta el
+--    bloqueo de RN02 y aplica RN04 (mensaje genérico). NO modifica estado: el
+--    conteo de intentos (registrar/reset) lo ejecuta el servicio de
+--    autenticación de la app, dentro del audit_context, para que la bitácora
+--    (RF-20) atribuya esas escrituras. Devuelve un código de resultado para
+--    que la app oriente los efectos sin parsear el mensaje del cliente:
+--    resultado ∈ ('ok','credenciales','bloqueado','inactivo'); 'credenciales'
+--    con usuario_id NULL = tenant/usuario inexistente (no se cuenta, RN04).
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION core.intentar_login(p_tenant_slug TEXT, p_correo CITEXT, p_password TEXT)
-RETURNS TABLE(ok BOOLEAN, usuario_id UUID, mensaje TEXT) AS $$
+RETURNS TABLE(resultado TEXT, usuario_id UUID, mensaje TEXT) AS $$
 DECLARE
   v_usuario core.usuario%ROWTYPE;
   v_tenant  core.tenant%ROWTYPE;
 BEGIN
   SELECT * INTO v_tenant FROM core.tenant WHERE slug = p_tenant_slug;
   IF NOT FOUND OR v_tenant.estado <> 'activo' THEN
-    RETURN QUERY SELECT FALSE, NULL::UUID, 'Credenciales incorrectas';  -- RN04: no revela existencia
+    RETURN QUERY SELECT 'credenciales', NULL::UUID, 'Credenciales incorrectas';  -- RN04
     RETURN;
   END IF;
 
@@ -1517,28 +1533,33 @@ BEGIN
     WHERE tenant_id = v_tenant.id AND correo = p_correo;
 
   IF NOT FOUND THEN
-    RETURN QUERY SELECT FALSE, NULL::UUID, 'Credenciales incorrectas';
+    RETURN QUERY SELECT 'credenciales', NULL::UUID, 'Credenciales incorrectas';
     RETURN;
   END IF;
 
   IF v_usuario.bloqueado_hasta IS NOT NULL AND v_usuario.bloqueado_hasta > now() THEN
-    RETURN QUERY SELECT FALSE, v_usuario.id, format('Cuenta bloqueada, intente después de %s', v_usuario.bloqueado_hasta);
+    RETURN QUERY SELECT 'bloqueado', v_usuario.id,
+      format('Cuenta bloqueada, intente después de %s', v_usuario.bloqueado_hasta);
+    RETURN;
+  END IF;
+
+  IF v_usuario.estado = 'suspendido' THEN
+    RETURN QUERY SELECT 'inactivo', v_usuario.id,
+      'Su cuenta ha sido suspendida. Contacte al administrador.';  -- RF-08/CA03
     RETURN;
   END IF;
 
   IF v_usuario.estado <> 'activo' THEN
-    RETURN QUERY SELECT FALSE, v_usuario.id, 'Active su cuenta primero';
+    RETURN QUERY SELECT 'inactivo', v_usuario.id, 'Active su cuenta primero';
     RETURN;
   END IF;
 
   IF v_usuario.password_hash IS NULL OR NOT (v_usuario.password_hash = crypt(p_password, v_usuario.password_hash)) THEN
-    PERFORM core.registrar_intento_fallido(v_usuario.id);
-    RETURN QUERY SELECT FALSE, v_usuario.id, 'Credenciales incorrectas';
+    RETURN QUERY SELECT 'credenciales', v_usuario.id, 'Credenciales incorrectas';
     RETURN;
   END IF;
 
-  PERFORM core.reset_intentos_fallidos(v_usuario.id);
-  RETURN QUERY SELECT TRUE, v_usuario.id, 'OK, continuar con validación de OTP (MFA)';
+  RETURN QUERY SELECT 'ok', v_usuario.id, 'OK, continuar con validación de OTP (MFA)';
 END;
 $$ LANGUAGE plpgsql;
 

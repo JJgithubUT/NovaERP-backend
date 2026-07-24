@@ -9,10 +9,13 @@
 @password = CambiarEnPrimerLogin!
 
 ###########################################################
-# LOGIN
+# LOGIN (RF-16) — DOS FASES: password -> reto OTP -> sesion
 ###########################################################
 
-# Aprobado 🟩
+# FASE 1: valida password. NO devuelve token de sesion; devuelve un reto.
+#   · mfa:"enroll" (primer login / admin sembrado) -> incluye "secret" y
+#     "otpauth_uri" una sola vez; configura tu autenticador con ese secreto.
+#   · mfa:"otp" (ya enrolado) -> solo el reto.
 POST {{host}}/api/auth/login/
 Content-Type: application/json
 
@@ -24,8 +27,74 @@ Content-Type: application/json
 
 > {%
 const body = response.parsedBody;
+client.global.set("reto", body.reto);
+// En enrolamiento, guarda el secreto para generar el codigo en tu app TOTP:
+if (body.secret) { client.global.set("mfaSecret", body.secret); }
+%}
+
+###
+
+# FASE 2: envia el codigo de 6 digitos de tu app autenticadora (o el generado
+# con el secret del enrolamiento). REST Client no calcula TOTP: pega el codigo
+# actual a mano. Devuelve el token de sesion definitivo.
+POST {{host}}/api/auth/otp/
+Content-Type: application/json
+
+{
+  "reto": "{{reto}}",
+  "codigo": "000000"
+}
+
+> {%
+const body = response.parsedBody;
 client.global.set("token", body.token);
 %}
+
+###
+
+# Codigo incorrecto -> 401 y cuenta como intento fallido (mismo bloqueo global)
+POST {{host}}/api/auth/otp/
+Content-Type: application/json
+
+{
+  "reto": "{{reto}}",
+  "codigo": "111111"
+}
+
+###
+
+# Perfil del usuario autenticado (usa el token de la fase 2)
+GET {{host}}/api/core/me/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-16/RN02 — bloqueo por intentos fallidos.
+# Repetir este POST 5 veces con password incorrecta: cada uno responde 401
+# ("Credenciales incorrectas", RN04) y registra LOGIN_FAILED. El 5o dispara el
+# bloqueo: evento ACCOUNT_LOCKED (criticidad ALTA) + notificacion encolada.
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+  "tenant_slug": "{{tenant}}",
+  "correo": "{{email}}",
+  "password": "password-incorrecta"
+}
+
+###
+
+# 6o intento estando bloqueado -> 401 con "Cuenta bloqueada..." (no cuenta, no
+# re-bloquea). Incluso con la password correcta se rechaza mientras dure el
+# bloqueo (CA04). Esperar el tiempo de bloqueo o resetear en DB para reintentar.
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+  "tenant_slug": "{{tenant}}",
+  "correo": "{{email}}",
+  "password": "{{password}}"
+}
 
 ###
 
@@ -860,6 +929,295 @@ Authorization: Bearer {{token}}
 ###
 
 ###########################################################
+# EDITAR USUARIO (RF-07)
+###########################################################
+
+# nuevoUsuarioId lo captura el alta de RF-05, mas abajo
+
+# TENANT_ADMIN: modificacion total
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre_completo":"Nombre Editado",
+    "telefono":"5551234567"
+}
+
+###
+
+# roles fuera de RF-07 -> 422 (se administran en RF-14/RF-15)
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "roles":["00000000-0000-0000-0000-000000000000"]
+}
+
+###
+
+# estado fuera de RF-07 -> 422 (es RF-08)
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "estado":"suspendido"
+}
+
+###
+
+# RN03: correo ya registrado en el tenant -> 422
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"admin@acme.com"
+}
+
+###
+
+# RN05/CA04: cambio de correo -> pendiente_verificacion + token de validacion
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"correo.nuevo@acme.com"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("verificacionToken", body.verificacion_token);
+%}
+
+###
+
+# el usuario no puede autenticarse hasta reconfirmar -> 401
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+    "tenant_slug":"{{tenant}}",
+    "correo":"correo.nuevo@acme.com",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# ya tiene contrasena: enviarla en la reconfirmacion -> 422
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"{{verificacionToken}}",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# reconfirmacion de correo: mismo endpoint, sin password -> 200 y estado activo
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"{{verificacionToken}}"
+}
+
+###
+
+# el propietario edita solo sus datos personales (sin core:usuarios:editar)
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{tokenNoAdmin}}
+Content-Type: application/json
+
+{
+    "nombre_completo":"Yo Mismo",
+    "telefono":"5559999999"
+}
+
+###
+
+# el propietario NO puede cambiar su propio correo -> 422
+PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
+Authorization: Bearer {{tokenNoAdmin}}
+Content-Type: application/json
+
+{
+    "correo":"otro@acme.com"
+}
+
+###
+
+# el propietario NO puede editar a un tercero -> 403
+PATCH {{host}}/api/core/usuarios/00000000-0000-0000-0000-000000000000/
+Authorization: Bearer {{tokenNoAdmin}}
+Content-Type: application/json
+
+{
+    "nombre_completo":"Ajeno"
+}
+
+###
+
+# RF-07 / RF-16 RN07 — reseteo de MFA (accion exclusiva del TENANT_ADMIN).
+# Deja al usuario sin segundo factor; su proximo login (fase 1) devolvera
+# mfa:"enroll" con un secreto nuevo para re-enrolar antes de completar acceso.
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reset-mfa/
+Authorization: Bearer {{token}}
+
+###
+
+# el propio usuario NO puede resetearse el MFA -> 403 (no es admin)
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reset-mfa/
+Authorization: Bearer {{tokenNoAdmin}}
+
+###
+
+###########################################################
+# SUSPENDER / REACTIVAR USUARIO (RF-08)
+###########################################################
+
+# Suspender: cierra todas sus sesiones (RN03) y bloquea su login (RN02).
+# No puede suspenderse al ultimo TENANT_ADMIN activo (RN04).
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/suspender/
+Authorization: Bearer {{token}}
+
+###
+
+# El usuario suspendido no puede iniciar sesion -> 401 "Su cuenta ha sido
+# suspendida. Contacte al administrador." (CA03)
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+  "tenant_slug": "{{tenant}}",
+  "correo": "{{nuevoCorreo}}",
+  "password": "{{nuevaPassword}}"
+}
+
+###
+
+# Reactivar: restaura el login y conserva los roles previos (RN05/CA04)
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reactivar/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# SESIONES: LOGOUT Y REVOCACION (RF-17 / RF-19)
+###########################################################
+
+# RF-19/CA01: el usuario lista SOLO sus propias sesiones activas (flag "actual")
+GET {{host}}/api/core/sesiones/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-19/CA03: cerrar todas las demas sesiones, conservar la actual
+POST {{host}}/api/core/sesiones/cerrar-otras/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-19/CA02: cerrar una sesion propia por su jti (sustituir por uno real de la
+# lista anterior). Un jti ajeno no revoca nada (RN01).
+DELETE {{host}}/api/core/sesiones/00000000-0000-0000-0000-000000000000/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-19/RN02: el TENANT_ADMIN cierra TODAS las sesiones de un usuario (solo
+# devuelve el conteo, sin detalle de dispositivos)
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/cerrar-sesiones/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-17: logout de la sesion en curso. Tras esto, el mismo token da 401.
+POST {{host}}/api/auth/logout/
+Authorization: Bearer {{token}}
+
+###
+
+# CA01: el mismo token tras logout -> 401
+GET {{host}}/api/core/me/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# RECUPERAR / RESTABLECER CONTRASENA (RF-18)
+###########################################################
+
+# Solicitud: SIEMPRE responde el mismo mensaje generico (RN02, no revela si el
+# correo existe). El token se envia por correo (notificacion encolada), NO en la
+# respuesta. Un correo inexistente da exactamente la misma respuesta.
+POST {{host}}/api/auth/recuperar/
+Content-Type: application/json
+
+{
+  "tenant_slug": "{{tenant}}",
+  "correo": "{{email}}"
+}
+
+###
+
+# Confirmacion: token de un solo uso (1 h). Al restablecer se invalidan TODAS
+# las sesiones previas del usuario (RN03). Sustituir por el token real recibido.
+POST {{host}}/api/auth/restablecer/
+Content-Type: application/json
+
+{
+  "token": "TOKEN-RECIBIDO-POR-CORREO",
+  "password": "NuevaPassword12345!"
+}
+
+###
+
+# /me ahora incluye usuario.ultimo_acceso (RF-09/CA03)
+GET {{host}}/api/core/me/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# POLITICAS DE SEGURIDAD DEL TENANT (RF-22)
+###########################################################
+
+# Consultar la politica vigente + los limites min/max de plataforma
+GET {{host}}/api/core/config-seguridad/
+Authorization: Bearer {{token}}
+
+###
+
+# Endurecer la politica (dentro de los limites). No invalida contrasenas ni
+# sesiones ya existentes (RN02/CA02); aplica a los siguientes cambios.
+PATCH {{host}}/api/core/config-seguridad/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "politica_password_min_len": 16,
+    "bloqueo_minutos": 45
+}
+
+###
+
+# CA01/RN01: por debajo del minimo de plataforma (8) -> 422 con el limite
+PATCH {{host}}/api/core/config-seguridad/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "politica_password_min_len": 6
+}
+
+###
+
+###########################################################
 # ROLES Y PERMISOS - RBAC (RF-10 a RF-15)
 ###########################################################
 
@@ -1004,7 +1362,21 @@ Content-Type: application/json
 @nuevoCorreo = qa.rf05@acme.com
 @nuevaPassword = Whatever12345!
 
-# alta -> 201, estado 'pendiente', sin password, notificacion en cola
+# RF-06: directorio paginado. Busqueda ?search= (nombre/correo/puesto),
+# filtros ?estado= ?departamento= ?rol=<id> ?desde=&hasta=, orden
+# ?orden=nombre|created_at|ultimo_acceso (&desc=true). Exige core:usuarios:leer.
+GET {{host}}/api/core/usuarios/?orden=nombre
+Authorization: Bearer {{token}}
+
+###
+
+GET {{host}}/api/core/usuarios/?search=admin
+Authorization: Bearer {{token}}
+
+###
+
+# alta -> 201, estado 'pendiente', sin password, notificacion en cola.
+# puesto/departamento son opcionales (los usa el directorio RF-06).
 POST {{host}}/api/core/usuarios/
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -1012,7 +1384,9 @@ Content-Type: application/json
 {
     "correo":"{{nuevoCorreo}}",
     "nombre_completo":"QA RF05",
-    "roles":["{{rolId}}"]
+    "roles":["{{rolId}}"],
+    "puesto":"Analista",
+    "departamento":"Ventas"
 }
 
 > {%

@@ -10,6 +10,15 @@ from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, _is_authenticated,
 # OPTIONS/HEAD quedan fuera para no romper CORS ni los health checks.
 METODOS_PROTEGIDOS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 
+# Centinela que permite_para() puede devolver cuando un metodo no exige
+# permiso de catalogo porque la autorizacion es por objeto: el actor accede a
+# su propio registro. La ERS lo define asi en RF-07 ("Usuario propietario:
+# solo datos personales") y volvera a aparecer en RF-09 y RF-19.
+#
+# Es un centinela explicito y no None para no debilitar el fallo cerrado:
+# None sigue significando "permiso no declarado" y responde 403.
+SIN_PERMISO = object()
+
 # Dominio del nucleo (Modulos 1-7). RF-01/RN06: el modulo de Identidad y
 # Gestion de Usuarios nunca puede deshabilitarse, asi que sus permisos jamas
 # quedan inertes por RF-10/RN04 y se excluyen del filtro por modulo activo.
@@ -204,8 +213,20 @@ class PermissionRequiredMixin(LoginRequiredMixin):
     Falla cerrado a proposito: si un metodo de METODOS_PROTEGIDOS no tiene
     permiso declarado, responde 403 en vez de dejar pasar. Olvidar una
     declaracion cierra el endpoint, no lo abre. Los endpoints que la ERS
-    define para "todos los usuarios autenticados" (RF-09, RF-17) no usan este
-    mixin sino LoginRequiredMixin directamente.
+    define para "todos los usuarios autenticados" (RF-17) no usan este mixin
+    sino LoginRequiredMixin directamente.
+
+    Cuando la autorizacion depende del objeto y no solo del endpoint, se
+    sobrescribe permiso_para() y se devuelve SIN_PERMISO para el caso en que
+    el actor opera sobre su propio registro:
+
+        def permiso_para(self, metodo):
+            if self.kwargs.get("pk") == str(self.request.usuario_id):
+                return SIN_PERMISO
+            return super().permiso_para(metodo)
+
+    En ese caso la vista o el servicio deben acotar lo que el propietario
+    puede tocar; saltarse el permiso no es saltarse las reglas de negocio.
     """
 
     permisos = {}
@@ -219,6 +240,8 @@ class PermissionRequiredMixin(LoginRequiredMixin):
     def dispatch(self, request, *args, **kwargs):
         if _is_authenticated(request) and request.method in METODOS_PROTEGIDOS:
             codigo = self.permiso_para(request.method)
+            if codigo is SIN_PERMISO:
+                return super().dispatch(request, *args, **kwargs)
             if codigo is None:
                 return JsonResponse(
                     PermissionDeniedError(None).to_dict(), status=403

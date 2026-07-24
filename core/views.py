@@ -1,21 +1,23 @@
-import datetime
 import json
 
-import jwt
-from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.db.models import Max
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from core.models import Modulo, Permiso, Rol, Tenant, Usuario
+from core.models import LogAuditoria, Modulo, Permiso, Rol, Tenant, Usuario
+from core.services import auth_service
+from core.services import config_service as config_svc
 from core.services import rol_service as rol_svc
+from core.services import session_service
 from core.services import usuario_service as usuario_svc
-from core.services.auth_service import LoginError, intentar_login
+from core.services.auth_service import LoginError
 from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, tenant_scoped
 from core.utils.errors import BusinessRuleError
 from core.utils.permissions import (
+    SIN_PERMISO,
     PermissionDeniedError,
     PermissionRequiredMixin,
     PermissionResolver,
@@ -25,6 +27,10 @@ from core.utils.views import CatalogDetailView, CatalogListCreateView
 
 @method_decorator(csrf_exempt, name="dispatch")
 class LoginView(View):
+    """RF-16 fase 1: valida password y devuelve un reto de segundo factor
+    (password -> reto OTP -> sesion). Vista fina; toda la orquestacion vive en
+    auth_service.autenticar. El token de sesion se emite en la fase 2 (OtpView)."""
+
     def post(self, request):
         try:
             data = json.loads(request.body)
@@ -40,30 +46,59 @@ class LoginView(View):
                 status=400,
             )
 
+        # El tenant se resuelve para el contexto de auditoria y la expiracion;
+        # si no existe, el validador falla igual con el mensaje generico de
+        # RN04 (sin revelar la inexistencia).
+        tenant = Tenant.objects.filter(slug=tenant_slug).first()
+
         try:
-            result = intentar_login(tenant_slug, correo, password)
+            reto = auth_service.autenticar(request, tenant, tenant_slug, correo, password)
         except LoginError as e:
             return JsonResponse({"mensaje": str(e)}, status=401)
 
-        payload = {
-            "usuario_id": str(result["usuario_id"]),
-            "tenant_slug": tenant_slug,
-            "exp": datetime.datetime.now(datetime.timezone.utc)
-            + datetime.timedelta(hours=8),
-        }
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+        return JsonResponse(reto)
 
-        return JsonResponse({"token": token, "mensaje": result["mensaje"]})
+
+@method_decorator(csrf_exempt, name="dispatch")
+class OtpView(View):
+    """RF-16 fase 2: valida el codigo del segundo factor contra el reto emitido
+    en la fase 1 y, si es correcto, completa el login emitiendo el JWT de
+    sesion. Endpoint publico a proposito: el usuario aun no tiene sesion; la
+    autorizacion la da el reto de un solo flujo, no un JWT de sesion."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"mensaje": "JSON invalido."}, status=400)
+
+        reto = data.get("reto")
+        codigo = data.get("codigo")
+        if not reto or not codigo:
+            return JsonResponse({"mensaje": "reto y codigo son obligatorios."}, status=400)
+
+        try:
+            token, mensaje = auth_service.validar_otp(request, reto, codigo)
+        except LoginError as e:
+            return JsonResponse({"mensaje": str(e)}, status=401)
+
+        return JsonResponse({"token": token, "mensaje": mensaje})
 
 
 # ---------------------------------------------------------------- RF-05
 
 @method_decorator(csrf_exempt, name="dispatch")
-class UsuarioCreateView(PermissionRequiredMixin, View):
-    """RF-05: alta de usuario dentro del tenant. Solo POST; el directorio
-    paginado con sus filtros y ordenamientos es RF-06."""
+class UsuarioListCreateView(PermissionRequiredMixin, View):
+    """RF-06 (GET, directorio) y RF-05 (POST, alta). Cada metodo pide su
+    permiso: leer para consultar, crear para dar de alta."""
 
-    permiso_requerido = "core:usuarios:crear"
+    permisos = {"GET": "core:usuarios:leer", "POST": "core:usuarios:crear"}
+
+    def get(self, request):
+        try:
+            return JsonResponse(usuario_svc.directorio_usuarios(request))
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
 
     def post(self, request):
         try:
@@ -87,6 +122,112 @@ class UsuarioCreateView(PermissionRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class UsuarioDetailView(PermissionRequiredMixin, View):
+    """RF-07: edicion de usuario. La ERS define dos actores con alcances
+    distintos, asi que la autorizacion es por objeto:
+
+      · sobre un tercero  -> exige core:usuarios:editar (modificacion total)
+      · sobre uno mismo   -> no exige permiso, pero el servicio limita los
+                             campos a los datos personales
+
+    No administra roles ni estado: eso vive en RF-14/RF-15 y RF-08."""
+
+    permisos = {"PATCH": "core:usuarios:editar"}
+
+    def permiso_para(self, metodo):
+        if str(self.kwargs.get("pk")) == str(self.request.usuario_id):
+            return SIN_PERMISO
+        return super().permiso_para(metodo)
+
+    def patch(self, request, pk):
+        try:
+            usuario = tenant_scoped(
+                Usuario.objects.select_related("tenant"), request
+            ).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "JSON invalido."}, status=400)
+
+        try:
+            usuario, token = usuario_svc.editar_usuario(usuario, data, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+
+        payload = usuario_svc.serialize_usuario(usuario)
+        if token:
+            # RF-07/CA04: mismo criterio que en el alta (RF-05). El enlace de
+            # confirmacion solo existe en claro en este instante; se entrega a
+            # quien edito mientras no exista el worker de correo de RF-25.
+            payload["verificacion_token"] = token
+        return JsonResponse(payload)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UsuarioResetMfaView(PermissionRequiredMixin, View):
+    """RF-07 / RF-16 RN07: el TENANT_ADMIN resetea el segundo factor de un
+    usuario (perdida de dispositivo). Accion de seguridad exclusiva del admin,
+    separada de la edicion de datos personales: exige core:usuarios:reset_mfa
+    siempre, sin el bypass de auto-edicion (un usuario no se resetea el MFA a si
+    mismo por esta via). Tras el reset, el usuario re-enrola en su proximo login."""
+
+    permiso_requerido = "core:usuarios:reset_mfa"
+
+    def post(self, request, pk):
+        try:
+            usuario = tenant_scoped(
+                Usuario.objects.select_related("tenant"), request
+            ).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+
+        usuario = usuario_svc.resetear_mfa(usuario, request)
+        return JsonResponse(usuario_svc.serialize_usuario(usuario))
+
+
+# ---------------------------------------------------------------- RF-08
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UsuarioSuspenderView(PermissionRequiredMixin, View):
+    """RF-08: el TENANT_ADMIN suspende un usuario. Cierra sus sesiones y bloquea
+    su login. Accion exclusiva del admin (permiso, sin bypass de propiedad)."""
+
+    permiso_requerido = "core:usuarios:suspender"
+
+    def post(self, request, pk):
+        try:
+            usuario = tenant_scoped(Usuario.objects.select_related("tenant"), request).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+        try:
+            usuario = usuario_svc.suspender_usuario(usuario, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+        return JsonResponse(usuario_svc.serialize_usuario(usuario))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UsuarioReactivarView(PermissionRequiredMixin, View):
+    """RF-08: el TENANT_ADMIN reactiva un usuario suspendido; conserva sus roles."""
+
+    permiso_requerido = "core:usuarios:suspender"
+
+    def post(self, request, pk):
+        try:
+            usuario = tenant_scoped(Usuario.objects.select_related("tenant"), request).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+        try:
+            usuario = usuario_svc.reactivar_usuario(usuario, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+        return JsonResponse(usuario_svc.serialize_usuario(usuario))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class ActivarUsuarioView(View):
     """Flujo de activacion de RF-05. Endpoint publico a proposito: el usuario
     aun no puede autenticarse (RN03) y la autorizacion la da el token de un
@@ -106,10 +247,159 @@ class ActivarUsuarioView(View):
         return JsonResponse(usuario_svc.serialize_usuario(usuario))
 
 
+# ---------------------------------------------------------------- RF-18
+
+@method_decorator(csrf_exempt, name="dispatch")
+class RecuperarPasswordView(View):
+    """RF-18: solicitud de restablecimiento. Publico. SIEMPRE responde el mismo
+    mensaje (RN02/CA01): no revela si el correo existe."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"mensaje": "JSON invalido."}, status=400)
+
+        usuario_svc.solicitar_restablecimiento(data, request)
+        return JsonResponse({"mensaje": usuario_svc.MSG_RECUPERAR})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class RestablecerPasswordView(View):
+    """RF-18: confirma el restablecimiento con el token de un solo uso. Publico
+    (el usuario no puede autenticarse: olvido su contrasena). Al terminar,
+    todas sus sesiones previas quedan invalidadas (RN03)."""
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "JSON invalido."}, status=400)
+
+        try:
+            usuario_svc.restablecer_password(data, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+
+        return JsonResponse({"mensaje": "Contrasena restablecida. Inicie sesion de nuevo."})
+
+
+# ---------------------------------------------------------------- RF-17
+
+@method_decorator(csrf_exempt, name="dispatch")
+class LogoutView(LoginRequiredMixin, View):
+    """RF-17: cierra la sesion en curso. Revoca la sesion del jti actual; el
+    middleware hara que el mismo token devuelva 401 de inmediato (CA01).
+    Idempotente (CA02): cerrar dos veces no genera error."""
+
+    def post(self, request):
+        session_service.revocar_una(request, request.session_jti, request.usuario_id)
+        return JsonResponse({"detail": "Sesion cerrada."})
+
+
+# ---------------------------------------------------------------- RF-19
+
+@method_decorator(csrf_exempt, name="dispatch")
+class SesionListView(LoginRequiredMixin, View):
+    """RF-19/CA01: el usuario lista SOLO sus propias sesiones activas (RN01:
+    nadie ve las de otro). Autogestion: no exige permiso, solo sesion."""
+
+    def get(self, request):
+        sesiones = session_service.listar_activas(request.usuario_id)
+        return JsonResponse(
+            {
+                "results": [
+                    session_service.serialize_sesion(s, request.session_jti)
+                    for s in sesiones
+                ]
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class SesionCerrarOtrasView(LoginRequiredMixin, View):
+    """RF-19/CA03: cierra todas las sesiones propias excepto la actual."""
+
+    def post(self, request):
+        n = session_service.revocar_otras(
+            request, request.usuario_id, request.session_jti
+        )
+        return JsonResponse({"revocadas": n})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class SesionDetailView(LoginRequiredMixin, View):
+    """RF-19/CA02: cierra una sesion propia por su jti (logout remoto).
+    Acotada al usuario del JWT: un jti ajeno no revoca nada (RN01) y no revela
+    su existencia."""
+
+    def delete(self, request, jti):
+        n = session_service.revocar_una(request, jti, request.usuario_id)
+        return JsonResponse({"revocada": n > 0})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class UsuarioCerrarSesionesView(PermissionRequiredMixin, View):
+    """RF-19/RN02: el TENANT_ADMIN fuerza el cierre de TODAS las sesiones de un
+    usuario de su tenant. Solo devuelve el conteo, sin detalle de dispositivos
+    (privacidad). Accion exclusiva del admin (permiso, sin bypass de propiedad)."""
+
+    permiso_requerido = "core:sesiones:revocar"
+
+    def post(self, request, pk):
+        try:
+            usuario = tenant_scoped(Usuario.objects.all(), request).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+
+        n = session_service.revocar_todas_de_usuario(request, usuario.id)
+        return JsonResponse({"revocadas": n})
+
+
+# ---------------------------------------------------------------- RF-22
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ConfigSeguridadView(PermissionRequiredMixin, View):
+    """RF-22: consulta (leer) y edicion (editar) de las politicas de seguridad
+    del tenant, cada metodo con su permiso."""
+
+    permisos = {
+        "GET": "core:politicas:leer",
+        "PUT": "core:politicas:editar",
+        "PATCH": "core:politicas:editar",
+    }
+
+    def get(self, request):
+        try:
+            cfg = config_svc.obtener_config(request)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+        return JsonResponse(config_svc.serialize_config(cfg))
+
+    def put(self, request):
+        return self._guardar(request)
+
+    def patch(self, request):
+        return self._guardar(request)
+
+    def _guardar(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"detail": "JSON invalido."}, status=400)
+        try:
+            cfg = config_svc.actualizar_config(data, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+        return JsonResponse(config_svc.serialize_config(cfg))
+
+
 class MeView(LoginRequiredMixin, View):
-    """Contexto del usuario autenticado: perfil, tenant, roles activos,
-    permisos derivados de esos roles y modulos habilitados para el tenant.
-    Pensado para que el frontend lo consuma justo despues del login."""
+    """RF-09: contexto del usuario autenticado: perfil, tenant, roles VIGENTES
+    (CA04), permisos derivados y modulos habilitados. Nunca expone
+    contrasena/hash/tokens/OTP (CA02). Incluye el ultimo acceso (CA03)."""
 
     def get(self, request):
         try:
@@ -122,6 +412,14 @@ class MeView(LoginRequiredMixin, View):
             return JsonResponse(UNAUTHORIZED, status=401)
 
         tenant = usuario.tenant
+
+        # CA03: fecha/hora del ultimo login exitoso. Se toma del evento LOGIN
+        # de la bitacora (RF-16 lo emite en cada login), que es la fuente de
+        # verdad; incluye el login de la sesion en curso.
+        ultimo_acceso = (
+            LogAuditoria.objects.filter(usuario_id=usuario.id, operacion="LOGIN")
+            .aggregate(m=Max("ocurrido_en"))["m"]
+        )
 
         roles = list(
             Rol.objects.filter(
@@ -159,6 +457,7 @@ class MeView(LoginRequiredMixin, View):
                     "correo": usuario.correo,
                     "estado": usuario.estado,
                     "mfa_enrolado": usuario.mfa_enrolado,
+                    "ultimo_acceso": ultimo_acceso.isoformat() if ultimo_acceso else None,
                 },
                 "tenant": {
                     "id": str(tenant.id),

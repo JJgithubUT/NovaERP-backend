@@ -67,8 +67,132 @@ Client → POST /api/auth/login/ → Django calls core.intentar_login() → Post
 ```
 
 - **No hay `django.contrib.auth`**: Todo JWT, sin sesiones en cookies
-- **Token**: Payload = `{usuario_id: UUID, tenant_slug: str, exp: int}`, firmado HS256
-- **Middleware**: `JWTCustomMiddleware` inyecta `request.usuario_id` y `request.tenant_slug` en cada request
+- **Token** (contrato definitivo, Sprint 5): Payload = `{sub, tid, jti, iat, exp}`,
+  firmado HS256. `sub`=usuario, `tid`=tenant slug, `jti`=id de sesión. El JWT solo
+  **identifica**; no lleva permisos, roles ni estado — todo dato dinámico se
+  resuelve desde la DB en cada petición.
+- **Sesión persistida (`core.sesion`) = fuente de verdad**: el login inserta una
+  sesión y `session_service` es su **único gestor** (crear, validar, listar,
+  revocar). El `jti` liga token y sesión.
+- **Logout y revocación (RF-17 / RF-19)**: revocar = escribir `revocada_en` +
+  `revocada_por`; el middleware ya hace que el token dé 401 de inmediato. El
+  middleware expone `request.session_jti` (identidad de sesión; sigue siendo
+  solo-lectura). Endpoints:
+  - `POST /api/auth/logout/` — cierra la sesión en curso (idempotente).
+  - `GET /api/core/sesiones/` — el usuario lista **solo las suyas** (RN01), con
+    flag `actual`.
+  - `DELETE /api/core/sesiones/<jti>/` — cierra una sesión propia (CA02).
+  - `POST /api/core/sesiones/cerrar-otras/` — cierra todas menos la actual (CA03).
+  - `POST /api/core/usuarios/<pk>/cerrar-sesiones/` — el TENANT_ADMIN
+    (`core:sesiones:revocar`) cierra **todas** las de un usuario; devuelve solo
+    el conteo, **sin detalle** de dispositivos (RN02, privacidad).
+  - **Desviación documentada (RF-19/CA01)**: `ultima_actividad` = `iniciada_en`
+    (no se rastrea la actividad real) para no convertir el middleware en escritor
+    ni ensuciar la bitácora de RF-20 con un UPDATE por minuto y sesión. La
+    ubicación por IP (narrativa, no en CA01) queda fuera: exigiría GeoIP.
+- **Recuperar / restablecer contraseña (RF-18)**: `POST /api/auth/recuperar/`
+  (público) SIEMPRE responde el mismo mensaje genérico (RN02: no revela si el
+  correo existe) y **no** devuelve el token — se encola por correo (RF-25). El
+  token de un solo uso (1 h, RN01) se guarda hasheado en `token_activacion`, la
+  misma columna de acción-de-un-solo-uso (limitación: una acción pendiente a la
+  vez). `POST /api/auth/restablecer/` consume el token, fija la contraseña vía
+  `crypt` en la DB y **revoca todas las sesiones previas** (RN03/CA03). Token
+  expirado o reusado → mismo error (CA02).
+- **RF-09** (`GET /api/core/me/`): expone `usuario.ultimo_acceso` (CA03), tomado
+  del último evento `LOGIN` de la bitácora; nunca expone contraseña/hash/tokens
+  (CA02); roles vigentes (CA04).
+- **RF-22 políticas de seguridad** (`GET`/`PATCH`/`PUT /api/core/config-seguridad/`,
+  permisos `core:politicas:leer` / `:editar`): el TENANT_ADMIN endurece su política
+  dentro de los **límites de plataforma** (`config_service.LIMITES`; ej. longitud
+  mínima de contraseña 8-128) — fuera de rango → 422 con el límite (RN01/CA01). El
+  cambio **no** invalida retroactivamente contraseñas ni sesiones (RN02/CA02): la
+  política de contraseña se lee al fijarla y la expiración al emitir la sesión, no
+  después. La auditoría de valores anterior/nuevo (CA03) la da el trigger de RF-20
+  sobre el UPDATE. Sin esquema nuevo (la tabla ya existía).
+- **RF-06 directorio** (`GET /api/core/usuarios/`, permiso `core:usuarios:leer`):
+  paginado y **siempre acotado al tenant** del JWT (RN01/CA05). Búsqueda por
+  nombre/correo/puesto (CA02), filtros por estado/rol/departamento/rango de alta
+  (CA03), orden por nombre/alta/último acceso (CA04, `ultimo_acceso` anotado
+  desde los eventos `LOGIN`), mensaje de vacío (CA07). Se añadieron
+  `usuario.puesto` y `usuario.departamento` (opcionales; el admin los fija en
+  alta/edición). **Desviación (RN03/CA06)**: no hay enmascaramiento por política
+  de privacidad ni auditoría condicional de lectura — el esquema de Fase 0 no
+  tiene esa configuración (sería RF-22); se devuelven los campos a quien tiene
+  el permiso y la lectura no se audita (default de RF-20).
+- **RF-08 suspender/reactivar** (`POST /api/core/usuarios/<pk>/suspender/` y
+  `/reactivar/`, permiso `core:usuarios:suspender`): suspender pone
+  `estado='suspendido'`, **cierra todas las sesiones** (RN03/CA02, vía
+  `session_service`) y bloquea el login (el validador devuelve el mensaje de
+  CA03); no puede suspenderse al **último TENANT_ADMIN activo** (RN04, mismo
+  criterio que RF-15). Reactivar conserva los roles (RN05). **Fuera de alcance
+  (la ERS lo difiere al Módulo de Workflow, Fase 1)**: RN06/CA07, bloquear las
+  aprobaciones pendientes del suspendido — no existe entidad de aprobación ni la
+  bandera `is_blocked_by_suspension` en el esquema de Fase 0.
+- **Middleware**: `JWTCustomMiddleware` responde una sola pregunta — ¿la sesión
+  sigue viva? Valida firma+exp del token y luego `session_service.sesion_valida(jti)`;
+  una sesión revocada o expirada en la DB invalida el token aunque su `exp`
+  cripto no haya pasado. Expone `request.usuario_id` (`sub`) y `request.tenant_slug`
+  (`tid`). Sin reglas de negocio, permisos ni auditoría.
+- **Expiración configurable por tenant**: `core.sesion.expira_en` y el `exp` del
+  JWT salen de `config_seguridad_tenant.jwt_expiracion_horas` (default 8). RF-16
+  la **lee**; editarla es RF-22.
+- **Login de dos fases con segundo factor (RF-16)**: `auth_service` es el único
+  orquestador de ambas fases.
+  - **Fase 1 — `POST /api/auth/login/`** (`autenticar`): valida password (SQL
+    puro). Si es correcto **no** emite sesión: devuelve un *reto OTP* efímero
+    (JWT ~5 min, `typ:"otp_challenge"`, **sin fila en `core.sesion`** → el
+    middleware nunca lo acepta). Si el usuario no tiene segundo factor,
+    lo **provisiona** (genera secreto TOTP, lo cifra y devuelve `secret` +
+    `otpauth_uri` una sola vez).
+  - **Fase 2 — `POST /api/auth/otp/`** (`validar_otp`): verifica el código TOTP
+    contra el secreto; si es correcto confirma el enrolamiento pendiente,
+    resetea el contador, crea la sesión y emite `LOGIN`. El token de sesión se
+    entrega **aquí**.
+  - **TOTP** (`core/utils/totp.py`): RFC 6238 con solo stdlib (`hmac`,
+    `hashlib`, `base64`, `struct`, `time`), SHA1/6 dígitos/30 s, tolerancia ±1
+    paso. El secreto se guarda cifrado (`core/utils/secretos.py`, Fernet de la
+    `cryptography` ya presente; clave derivada de `SECRET_KEY`).
+  - **Estados de MFA** en columnas existentes: `mfa_secret NULL` → sin enrolar;
+    `mfa_secret` presente + `mfa_enrolado=False` → provisionado sin confirmar;
+    ambos → listo. Sin tabla ni columna nuevas.
+- **Eventos de autenticación (un solo mecanismo)**: `LOGIN`, `LOGIN_FAILED` y
+  `ACCOUNT_LOCKED` se emiten desde el orquestador con un único helper, como
+  `INSERT` en `core.log_auditoria` (eventos de dominio que el trigger CUD no
+  cubre). `LOGIN` alimenta `v_actividad_usuarios` (último acceso, RF-06/RF-23).
+- **Bloqueo (RF-16/RN02)**: `core.registrar_intento_fallido` (contador 5 / 30 min
+  por `config_seguridad_tenant`) devuelve el bloqueo resultante; si este intento
+  lo disparó, el orquestador emite `ACCOUNT_LOCKED` (criticidad **ALTA**) y
+  **encola** una `Notificacion` de alerta (`pendiente`; la entrega es RF-25, no
+  implementada). **Los fallos de password (fase 1) y de OTP (fase 2) alimentan
+  el mismo contador** — una sola fuente de verdad, sin contadores paralelos.
+
+##### Desviaciones documentadas de la ERS — RF-16
+
+1. **RN07 — enrolamiento en el primer login, no en la activación.** RN07 sitúa
+   el enrolamiento MFA en la activación (RF-01/RF-05). No se hizo así: los 29
+   usuarios existentes y el admin sembrado no tienen secreto, y se descartó una
+   migración masiva. En su lugar, cualquier usuario sin `mfa_secret` se enrola
+   automáticamente en su siguiente login, **por el mismo camino y sin
+   excepciones** (el admin incluido). Coste: el primer enrolamiento es
+   *trust-on-first-use* — un atacante que ya tenga la contraseña podría enrolar
+   su propio autenticador. Es inherente a enrolar en login vs. activación.
+2. **Flujo 3a — "exactamente 3 intentos de OTP".** No se implementa un contador
+   por-desafío (habría exigido una tabla nueva, descartada). El reto caduca por
+   tiempo (~5 min) y los fallos de OTP cuentan al **bloqueo global** de RN02
+   (5 intentos). El límite global es más estricto, así que ninguna CA
+   obligatoria (CA01-CA04) se incumple.
+3. **Reseteo de MFA (RN07, 2ª mitad)** — pérdida de dispositivo. Implementado
+   como `POST /api/core/usuarios/<pk>/reset-mfa/`, acción **exclusiva del
+   TENANT_ADMIN** (permiso `core:usuarios:reset_mfa`, sin el bypass de
+   auto-edición: un usuario no se resetea el MFA a sí mismo). El reset pone
+   `mfa_secret=NULL` + `mfa_enrolado=False`; **no persiste ningún "token de
+   re-enrolamiento"** — la máquina de estados de RF-16 ya fuerza el re-enrolamiento
+   en el próximo login (mfa_secret NULL → reto de enrolamiento antes de completar
+   el acceso), cumpliendo RN07 sin almacenamiento nuevo. Las sesiones vivas no se
+   revocan (eso es RF-17/RF-19); solo el próximo login exige el nuevo factor.
+
+Con el reseteo implementado, **RF-16 queda Completo (con las desviaciones 1 y 2
+documentadas arriba)**: todos sus CA y su RN07 funcional se cumplen.
 
 #### 3b. **Autorización RBAC (RF-10 a RF-15)**
 
@@ -108,6 +232,32 @@ class ProductoListCreateView(CatalogListCreateView):
   (Módulos 1-7) y nunca queda inerte; el resto mapea a `core.modulo` por
   `upper(dominio)`. El catálogo vive en
   `sql/2026-07-24_rf10_rbac_catalogo.sql`.
+
+##### Desviación documentada de la ERS — RF-13/CA02
+
+La CA02 de RF-13 afirma que, al desactivar un rol, los usuarios que ya lo
+tenían *"conservan sus permisos activos de forma inerte y pueden seguir
+operando con normalidad"*.
+
+**El sistema implementa lo contrario: un rol inactivo no concede permisos.**
+
+La redacción de la ERS es inconsistente con el propio documento y con el modelo
+de seguridad:
+
+- Haría que desactivar un rol no tuviera ningún efecto de seguridad.
+- Contradice RF-12/RN01, que exige que un cambio de permisos surta efecto en la
+  siguiente petición sin esperar a que expire el JWT.
+- Viola el principio de menor privilegio: un usuario conservaría acceso
+  indefinidamente pese a que su rol fue dado de baja.
+
+La primera mitad de la CA02 sí se cumple: un rol inactivo no puede asignarse a
+nuevos usuarios, y las filas de `usuario_rol` no se borran, de modo que la baja
+es reversible reactivando el rol. La tercera parte (exigir al TENANT_ADMIN
+remover el rol inactivo la próxima vez que edite a ese usuario) corresponde a
+RF-07.
+
+Esta desviación es deliberada y está aprobada; debe reconciliarse en la próxima
+revisión de la ERS.
 
 #### 4. **Aislamiento de Tenant Obligatorio**
 
@@ -165,6 +315,20 @@ igual, pero con esos campos en NULL.
 `token_activacion` y `jwt_id` como `[REDACTED]` antes de escribirlos.
 **Limitación:** las filas anteriores al 2026-07-23 contienen esos valores sin
 enmascarar y no pueden corregirse — la tabla es append-only por diseño.
+
+**Residual del login — cerrado en el Sprint 5 · Paso 2a.** `core.intentar_login`
+es ahora un **validador puro**: valida credenciales y devuelve un código de
+resultado, sin modificar estado. El conteo de intentos
+(`registrar_intento_fallido` / `reset_intentos_fallidos`) lo invoca el servicio
+de autenticación **dentro del `audit_context` y con `set_audit_user(uid)` ya
+fijado**, así que esas `UPDATE` quedan atribuidas con usuario, tenant e IP. Para
+un usuario/tenant inexistente no hay ninguna escritura. Con esto **RF-20 es
+Completo**: toda operación CUD nueva lleva los 7 campos de RN01.
+
+Caveat de datos históricos (no corregible, append-only): las filas escritas
+antes de esta migración —hashes bcrypt sin enmascarar (pre-2026-07-23) y
+`UPDATE` de login sin actor (pre-Paso 2a)— permanecen como estaban. La bitácora
+prohíbe UPDATE/DELETE por diseño; el criterio de RF-20 se cumple hacia adelante.
 
 ### Capas de la Arquitectura
 

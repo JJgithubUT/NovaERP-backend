@@ -34,6 +34,12 @@ DEBUG = True
 
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
+# RF-20/RN01: la bitacora registra la IP de origen. Detras de un reverse proxy
+# REMOTE_ADDR es la del proxy, no la del cliente. Activar solo cuando exista un
+# proxy de confianza que reescriba la cabecera: si se confia en X-Forwarded-For
+# sin proxy delante, cualquier cliente puede falsear la IP que queda auditada.
+USE_X_FORWARDED_FOR = os.getenv('USE_X_FORWARDED_FOR', 'False').strip().lower() in ('1', 'true')
+
 
 # Application definition
 

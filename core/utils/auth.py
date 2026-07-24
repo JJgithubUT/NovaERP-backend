@@ -4,6 +4,9 @@ from django.http import JsonResponse
 
 UNAUTHORIZED = {"detail": "No autorizado o sesion expirada"}
 
+# La autorizacion vive en core/utils/permissions.py y se resuelve por codigo
+# de permiso, nunca por nombre de rol.
+
 
 def _is_authenticated(request):
     return bool(getattr(request, "usuario_id", None)) and bool(

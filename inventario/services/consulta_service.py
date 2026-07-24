@@ -1,3 +1,6 @@
+from core.utils.audit import audit_context
+
+
 def serialize_stock_disponible(row):
     return {
         "sku": row.sku,
@@ -48,5 +51,6 @@ def serialize_alerta(a):
 
 def marcar_alerta_notificada(alerta, request):
     alerta.notificada = True
-    alerta.save(update_fields=["notificada"])
+    with audit_context(request, tenant_id=alerta.tenant_id):
+        alerta.save(update_fields=["notificada"])
     return alerta

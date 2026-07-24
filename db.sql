@@ -1187,42 +1187,16 @@ CREATE TRIGGER trg_factura_linea_validar
   FOR EACH ROW EXECUTE FUNCTION ventas.validar_cantidad_facturable();
 
 -- ----------------------------------------------------------------------------
--- AUDITORÍA: función genérica para insertar en core.log_auditoria desde
--- cualquier tabla de negocio vía trigger AFTER INSERT/UPDATE/DELETE.
--- Se activa selectivamente (no en todas las tablas) para no saturar; se
--- muestra el patrón aplicado a core.usuario como ejemplo de referencia.
+-- AUDITORÍA (RF-20): core.fn_redactar() + core.fn_auditar() + los 37 triggers
+-- AFTER INSERT/UPDATE/DELETE viven en sql/2026-07-23_rf20_auditoria.sql.
+--
+-- Ese script es la definición autoritativa y DEBE ejecutarse después de este
+-- archivo en cualquier instalación limpia. No se duplica aquí a propósito:
+-- la versión que vivía en esta sección solo soportaba tablas con columna
+-- tenant_id y PK simple "id", no registraba ip_origen (RF-20/RN01) y volcaba
+-- password_hash / mfa_secret / token_activacion en claro a una tabla
+-- append-only que nadie puede depurar (violaba RF-20/CA03).
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION core.fn_auditar()
-RETURNS TRIGGER AS $$
-DECLARE
-  v_tenant_id UUID;
-BEGIN
-  v_tenant_id := COALESCE(NEW.tenant_id, OLD.tenant_id);
-
-  INSERT INTO core.log_auditoria (tenant_id, usuario_id, entidad, entidad_id, operacion, valores_antes, valores_despues)
-  VALUES (
-    v_tenant_id,
-    NULLIF(current_setting('app.current_user_id', true), '')::UUID,
-    TG_TABLE_NAME,
-    COALESCE(NEW.id::TEXT, OLD.id::TEXT),
-    TG_OP,
-    CASE WHEN TG_OP IN ('UPDATE','DELETE') THEN to_jsonb(OLD) ELSE NULL END,
-    CASE WHEN TG_OP IN ('UPDATE','INSERT') THEN to_jsonb(NEW) ELSE NULL END
-  );
-  RETURN COALESCE(NEW, OLD);
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_auditar_usuario
-  AFTER INSERT OR UPDATE OR DELETE ON core.usuario
-  FOR EACH ROW EXECUTE FUNCTION core.fn_auditar();
-
-CREATE TRIGGER trg_auditar_rol
-  AFTER INSERT OR UPDATE OR DELETE ON core.rol
-  FOR EACH ROW EXECUTE FUNCTION core.fn_auditar();
-
--- Repetir CREATE TRIGGER ... core.fn_auditar() en cualquier otra tabla que
--- requiera bitácora granular (cotizacion, orden_compra, ajuste_inventario, etc.)
 
 
 

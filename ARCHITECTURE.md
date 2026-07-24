@@ -70,6 +70,45 @@ Client → POST /api/auth/login/ → Django calls core.intentar_login() → Post
 - **Token**: Payload = `{usuario_id: UUID, tenant_slug: str, exp: int}`, firmado HS256
 - **Middleware**: `JWTCustomMiddleware` inyecta `request.usuario_id` y `request.tenant_slug` en cada request
 
+#### 3b. **Autorización RBAC (RF-10 a RF-15)**
+
+El JWT **no autoriza**: solo identifica usuario y tenant. Los permisos se
+resuelven contra la base de datos en **cada petición**, porque RF-12/RN01 exige
+que un cambio de permisos surta efecto en la siguiente petición sin esperar a
+que expire el token. Los permisos que devuelve `/api/core/me/` son informativos
+para pintar la UI.
+
+```python
+from core.utils.permissions import PermissionRequiredMixin
+
+class ProductoListCreateView(CatalogListCreateView):
+    permisos = {
+        "GET":  "inventario:productos:leer",
+        "POST": "inventario:productos:crear",
+    }
+```
+
+- **Un solo mecanismo**: `PermissionResolver` resuelve el conjunto efectivo con
+  **una consulta por petición**, cacheada en el `request`.
+  `PermissionRequiredMixin` lo aplica a las vistas y `exigir_permiso(request,
+  codigo)` a los servicios, cuando el permiso depende de los datos.
+- **Falla cerrado**: un método de `GET/POST/PUT/PATCH/DELETE` sin permiso
+  declarado responde 403. Olvidar la declaración cierra el endpoint, no lo abre.
+  Los endpoints que la ERS define para "todos los usuarios autenticados"
+  (`/me/`) usan `LoginRequiredMixin` directamente.
+- **Bypass de rol de sistema**: un rol con `es_sistema=True` (TENANT_ADMIN)
+  autoriza todo sin filas en `rol_permiso`, porque RF-12/RN02 lo define como rol
+  protegido que no puede perder permisos. El bypass **no** atraviesa el
+  aislamiento multi-tenant: la consulta acota los roles a `r.tenant_id`.
+- **Permisos inertes**: un permiso cuyo módulo está desactivado en el tenant se
+  excluye del conjunto efectivo, pero su fila en `rol_permiso` se conserva
+  (RF-10/RN04). La regla vive en `codigos_aplicables()`, que consumen tanto el
+  resolutor como la validación de alta y edición de roles.
+- Nomenclatura `dominio:recurso:accion`. El dominio `core` es el núcleo
+  (Módulos 1-7) y nunca queda inerte; el resto mapea a `core.modulo` por
+  `upper(dominio)`. El catálogo vive en
+  `sql/2026-07-24_rf10_rbac_catalogo.sql`.
+
 #### 4. **Aislamiento de Tenant Obligatorio**
 
 Cada usuario tiene `request.tenant_slug` del JWT. Toda query se filtra:
@@ -97,17 +136,35 @@ cliente.save(update_fields=['activo'])
 # No aparecerá en ?activo=true pero conserva historial y referencias
 ```
 
-#### 6. **Auditoría a Nivel de Trigger**
+#### 6. **Auditoría a Nivel de Trigger (RF-20)**
 
-Postgres trigger `fn_auditar()` en cada UPDATE/DELETE:
+`core.fn_auditar()` está instalado como trigger AFTER INSERT/UPDATE/DELETE en las
+**37 tablas** de los esquemas `core`, `ventas`, `compras`, `inventario` y
+`finanzas`. Escribe en `core.log_auditoria` los 7 campos obligatorios del ERS:
+timestamp, tenant, usuario responsable, IP de origen, operación, entidad +
+identificador, y el payload diferencial.
 
-```sql
-INSERT INTO core.log_auditoria (
-  usuario_id, tabla, registro_id, accion, valores_anterior, valores_nuevo
-) VALUES (...);
+El trigger no puede deducir por sí solo el responsable, la IP ni el tenant de
+las tablas de detalle, así que la aplicación los publica por transacción:
+
+```python
+from core.utils.audit import audit_context
+
+with audit_context(request, tenant_id=tenant.id):
+    Cliente.objects.create(...)
 ```
 
-Django no tiene que ocuparse de ello — el trigger dispara automático.
+`audit_context` **sustituye a `transaction.atomic()`** en todos los servicios de
+escritura: abre la transacción y publica `app.current_user_id`,
+`app.current_tenant_id` y `app.current_ip` con `set_config(..., is_local=true)`,
+de modo que el contexto muere con la transacción y no se filtra a la siguiente
+petición que reutilice la conexión. Una escritura sin este contexto se audita
+igual, pero con esos campos en NULL.
+
+`core.fn_redactar()` enmascara `password_hash`, `mfa_secret`,
+`token_activacion` y `jwt_id` como `[REDACTED]` antes de escribirlos.
+**Limitación:** las filas anteriores al 2026-07-23 contienen esos valores sin
+enmascarar y no pueden corregirse — la tabla es append-only por diseño.
 
 ### Capas de la Arquitectura
 
@@ -127,7 +184,7 @@ Django no tiene que ocuparse de ello — el trigger dispara automático.
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  URLconf (novaerp_backend/urls.py)                          │
-│  ├─ core/urls.py          → /api/auth/login/, /api/core/me/
+│  ├─ core/urls.py          → /api/auth/*, /api/core/{me,usuarios,roles,permisos}/
 │  ├─ ventas/urls.py        → /api/ventas/clientes/
 │  ├─ inventario/urls.py    → /api/inventario/{productos,almacenes}/
 │  ├─ compras/urls.py       → /api/compras/proveedores/
@@ -139,6 +196,7 @@ Django no tiene que ocuparse de ello — el trigger dispara automático.
 │  Views (CBV con LoginRequiredMixin, @csrf_exempt)           │
 │  ├─ LoginView              → POST login, emite JWT          │
 │  ├─ MeView                 → GET perfil + contexto          │
+│  ├─ PermissionRequiredMixin → 401 sin sesion, 403 sin permiso│
 │  ├─ CatalogListCreateView  → GET listado, POST creación     │
 │  └─ CatalogDetailView      → PATCH edición, DELETE baja     │
 └────────────────────────┬────────────────────────────────────┘
@@ -445,6 +503,7 @@ Content-Type: application/json
 | Patrón | Implementación | Por qué |
 |---|---|---|
 | **Tenant Isolation** | `tenant_scoped(qs, request)` en cada queryset | Prevenir cross-tenant leaks |
+| **Autorización** | `permisos = {...}` + `PermissionRequiredMixin` | Un solo motor, falla cerrado |
 | **Soft Deletes** | `activo=False` nunca borra | Historial auditable |
 | **Transactions** | `transaction.atomic()` en creates | ACID compliance |
 | **Parameterized SQL** | `cursor.execute("...", [params])` | Prevent SQL injection |

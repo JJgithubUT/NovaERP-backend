@@ -1,10 +1,10 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
 from django.utils import timezone
 
 from compras.models import ConfigAprobacion, OrdenCompra, OrdenCompraLinea, Proveedor
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 from inventario.models import Producto
@@ -114,7 +114,7 @@ def crear_orden_compra(data, request):
     estado = "pendiente_aprobacion" if (umbral is not None and total > umbral) else "enviada"
 
     now = timezone.now()
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         orden = OrdenCompra.objects.create(
             id=uuid.uuid4(),
             tenant=tenant,
@@ -158,7 +158,7 @@ def editar_orden_compra(orden, data, request):
     lineas_actuales = list(OrdenCompraLinea.objects.filter(orden=orden))
     tiene_recepciones = any(l.cantidad_recibida > 0 for l in lineas_actuales)
 
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         if "proveedor_id" in data:
             if tiene_recepciones:
                 raise BusinessRuleError(
@@ -234,5 +234,6 @@ def cancelar_orden_compra(orden, request):
 
     orden.estado = "cancelada"
     orden.updated_at = timezone.now()
-    orden.save(update_fields=["estado", "updated_at"])
+    with audit_context(request, tenant_id=orden.tenant_id):
+        orden.save(update_fields=["estado", "updated_at"])
     return orden

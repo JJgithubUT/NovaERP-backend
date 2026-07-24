@@ -13,14 +13,16 @@ from compras.services import historial_service as historial_svc
 from compras.services import orden_service as orden_svc
 from compras.services import recepcion_service as recepcion_svc
 from core.models import Tenant
-from core.utils.auth import LoginRequiredMixin, UNAUTHORIZED, tenant_scoped
+from core.utils.auth import UNAUTHORIZED, tenant_scoped
 from core.utils.errors import BusinessRuleError
+from core.utils.permissions import PermissionRequiredMixin
 from core.utils.views import CatalogDetailView, CatalogListCreateView, ListCreateView, ReadOnlyListView
 from finanzas.models import CuentaPorPagar
 
 
 class ProveedorListCreateView(CatalogListCreateView):
     model = Proveedor
+    permisos = {"GET": "compras:proveedores:leer", "POST": "compras:proveedores:crear"}
     search_fields = ("razon_social", "rfc_o_id_fiscal")
     ordering = ("razon_social",)
     serialize_fn = staticmethod(svc.serialize_proveedor)
@@ -29,6 +31,7 @@ class ProveedorListCreateView(CatalogListCreateView):
 
 class ProveedorDetailView(CatalogDetailView):
     model = Proveedor
+    permisos = {"PATCH": "compras:proveedores:editar", "DELETE": "compras:proveedores:eliminar"}
     serialize_fn = staticmethod(svc.serialize_proveedor)
     edit_fn = staticmethod(svc.editar_proveedor)
     deactivate_fn = staticmethod(svc.dar_de_baja_proveedor)
@@ -37,7 +40,9 @@ class ProveedorDetailView(CatalogDetailView):
 # ---------------------------------------------------------------- RF-51
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ProveedorHistorialView(LoginRequiredMixin, View):
+class ProveedorHistorialView(PermissionRequiredMixin, View):
+    permiso_requerido = "compras:proveedores:leer"
+
     def get(self, request, pk):
         try:
             proveedor = tenant_scoped(Proveedor.objects.all(), request).get(pk=pk)
@@ -51,6 +56,7 @@ class ProveedorHistorialView(LoginRequiredMixin, View):
 
 class OrdenCompraListCreateView(ListCreateView):
     model = OrdenCompra
+    permisos = {"GET": "compras:ordenes:leer", "POST": "compras:ordenes:crear"}
     ordering = ("-created_at",)
     serialize_fn = staticmethod(orden_svc.serialize_orden)
     create_fn = staticmethod(orden_svc.crear_orden_compra)
@@ -61,7 +67,9 @@ class OrdenCompraListCreateView(ListCreateView):
 # ---------------------------------------------------------------- RF-48
 
 @method_decorator(csrf_exempt, name="dispatch")
-class OrdenCompraDetailView(LoginRequiredMixin, View):
+class OrdenCompraDetailView(PermissionRequiredMixin, View):
+    permisos = {"GET": "compras:ordenes:leer", "PATCH": "compras:ordenes:editar"}
+
     def _get_object(self, request, pk):
         return tenant_scoped(OrdenCompra.objects.all(), request).get(pk=pk)
 
@@ -93,7 +101,9 @@ class OrdenCompraDetailView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class OrdenCompraCancelarView(LoginRequiredMixin, View):
+class OrdenCompraCancelarView(PermissionRequiredMixin, View):
+    permiso_requerido = "compras:ordenes:cancelar"
+
     def post(self, request, pk):
         try:
             orden = tenant_scoped(OrdenCompra.objects.all(), request).get(pk=pk)
@@ -112,6 +122,7 @@ class OrdenCompraCancelarView(LoginRequiredMixin, View):
 
 class RecepcionListCreateView(ListCreateView):
     model = RecepcionMercancia
+    permisos = {"GET": "compras:recepciones:leer", "POST": "compras:recepciones:crear"}
     ordering = ("-created_at",)
     serialize_fn = staticmethod(recepcion_svc.serialize_recepcion)
     create_fn = staticmethod(recepcion_svc.crear_recepcion)
@@ -121,6 +132,7 @@ class RecepcionListCreateView(ListCreateView):
 
 class CuentaPorPagarListView(ReadOnlyListView):
     model = CuentaPorPagar
+    permiso_requerido = "compras:cuentas_por_pagar:leer"
     ordering = ("-created_at",)
     serialize_fn = staticmethod(historial_svc.serialize_cuenta_por_pagar)
     filter_fields = ("proveedor_id",)
@@ -130,7 +142,13 @@ class CuentaPorPagarListView(ReadOnlyListView):
 # ---------------------------------------------------------------- RF-52
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ConfigAprobacionView(LoginRequiredMixin, View):
+class ConfigAprobacionView(PermissionRequiredMixin, View):
+    permisos = {
+        "GET": "compras:config_aprobacion:leer",
+        "PUT": "compras:config_aprobacion:editar",
+        "PATCH": "compras:config_aprobacion:editar",
+    }
+
     def get(self, request):
         try:
             config = aprobacion_svc.obtener_config(request)

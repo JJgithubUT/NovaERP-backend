@@ -1,10 +1,10 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 from finanzas.models import CuentaPorCobrar
@@ -47,7 +47,7 @@ def crear_cliente(data, request):
         raise BusinessRuleError("RFC ya registrado en este tenant.", campo="rfc_o_id_fiscal")
 
     now = timezone.now()
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         cliente = Cliente.objects.create(
             id=uuid.uuid4(),
             tenant=tenant,
@@ -92,7 +92,8 @@ def editar_cliente(cliente, data, request):
             raise BusinessRuleError("limite_credito debe ser >= 0.", campo="limite_credito")
         cliente.limite_credito = limite
 
-    cliente.save()
+    with audit_context(request, tenant_id=cliente.tenant_id):
+        cliente.save()
     return cliente
 
 
@@ -111,5 +112,6 @@ def dar_de_baja_cliente(cliente, request):
         )
 
     cliente.activo = False
-    cliente.save(update_fields=["activo"])
+    with audit_context(request, tenant_id=cliente.tenant_id):
+        cliente.save(update_fields=["activo"])
     return cliente

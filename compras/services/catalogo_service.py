@@ -1,9 +1,9 @@
 import uuid
 
-from django.db import transaction
 from django.utils import timezone
 
 from compras.models import Proveedor
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 
@@ -32,7 +32,7 @@ def crear_proveedor(data, request):
         raise BusinessRuleError("RFC ya registrado en este tenant.", campo="rfc_o_id_fiscal")
 
     now = timezone.now()
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         proveedor = Proveedor.objects.create(
             id=uuid.uuid4(),
             tenant=tenant,
@@ -72,11 +72,13 @@ def editar_proveedor(proveedor, data, request):
     if "telefono" in data:
         proveedor.telefono = data["telefono"] or None
 
-    proveedor.save()
+    with audit_context(request, tenant_id=proveedor.tenant_id):
+        proveedor.save()
     return proveedor
 
 
 def dar_de_baja_proveedor(proveedor, request):
     proveedor.activo = False
-    proveedor.save(update_fields=["activo"])
+    with audit_context(request, tenant_id=proveedor.tenant_id):
+        proveedor.save(update_fields=["activo"])
     return proveedor

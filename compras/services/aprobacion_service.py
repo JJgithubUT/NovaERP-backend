@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from compras.models import ConfigAprobacion
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 
@@ -36,7 +37,8 @@ def actualizar_umbral(data, request):
     if umbral < 0:
         raise BusinessRuleError("umbral_monto debe ser >= 0.", campo="umbral_monto")
 
-    config, _ = ConfigAprobacion.objects.update_or_create(
-        tenant=tenant, defaults={"umbral_monto": umbral}
-    )
+    with audit_context(request, tenant_id=tenant.id):
+        config, _ = ConfigAprobacion.objects.update_or_create(
+            tenant=tenant, defaults={"umbral_monto": umbral}
+        )
     return config

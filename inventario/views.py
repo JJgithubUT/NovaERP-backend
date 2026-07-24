@@ -3,8 +3,9 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from core.utils.auth import LoginRequiredMixin, tenant_scoped
+from core.utils.auth import tenant_scoped
 from core.utils.pagination import paginate
+from core.utils.permissions import PermissionRequiredMixin
 from core.utils.views import (
     TRUE_VALUES,
     CatalogDetailView,
@@ -30,6 +31,7 @@ from inventario.services import movimiento_service as mov_svc
 
 class ProductoListCreateView(CatalogListCreateView):
     model = Producto
+    permisos = {"GET": "inventario:productos:leer", "POST": "inventario:productos:crear"}
     search_fields = ("sku", "nombre")
     ordering = ("sku",)
     serialize_fn = staticmethod(catalogo_svc.serialize_producto)
@@ -38,6 +40,7 @@ class ProductoListCreateView(CatalogListCreateView):
 
 class ProductoDetailView(CatalogDetailView):
     model = Producto
+    permisos = {"PATCH": "inventario:productos:editar", "DELETE": "inventario:productos:eliminar"}
     serialize_fn = staticmethod(catalogo_svc.serialize_producto)
     edit_fn = staticmethod(catalogo_svc.editar_producto)
     deactivate_fn = staticmethod(catalogo_svc.dar_de_baja_producto)
@@ -45,6 +48,7 @@ class ProductoDetailView(CatalogDetailView):
 
 class AlmacenListCreateView(CatalogListCreateView):
     model = Almacen
+    permisos = {"GET": "inventario:almacenes:leer", "POST": "inventario:almacenes:crear"}
     search_fields = ("nombre",)
     ordering = ("nombre",)
     serialize_fn = staticmethod(catalogo_svc.serialize_almacen)
@@ -53,6 +57,7 @@ class AlmacenListCreateView(CatalogListCreateView):
 
 class AlmacenDetailView(CatalogDetailView):
     model = Almacen
+    permisos = {"PATCH": "inventario:almacenes:editar", "DELETE": "inventario:almacenes:eliminar"}
     serialize_fn = staticmethod(catalogo_svc.serialize_almacen)
     edit_fn = staticmethod(catalogo_svc.editar_almacen)
     deactivate_fn = staticmethod(catalogo_svc.dar_de_baja_almacen)
@@ -62,6 +67,7 @@ class AlmacenDetailView(CatalogDetailView):
 
 class MovimientoListCreateView(ListCreateView):
     model = Movimiento
+    permisos = {"GET": "inventario:movimientos:leer", "POST": "inventario:movimientos:crear"}
     ordering = ("-ocurrido_en", "-id")
     serialize_fn = staticmethod(mov_svc.serialize_movimiento)
     create_fn = staticmethod(mov_svc.crear_movimiento_manual)
@@ -73,6 +79,7 @@ class MovimientoListCreateView(ListCreateView):
 
 class StockDisponibleListView(ReadOnlyListView):
     model = VStockDisponible
+    permiso_requerido = "inventario:stock:leer"
     ordering = ("producto", "almacen")
     serialize_fn = staticmethod(consulta_svc.serialize_stock_disponible)
     tenant_via_id = True
@@ -82,6 +89,7 @@ class StockDisponibleListView(ReadOnlyListView):
 
 class AjusteListCreateView(ListCreateView):
     model = AjusteInventario
+    permisos = {"GET": "inventario:ajustes:leer", "POST": "inventario:ajustes:crear"}
     ordering = ("-created_at",)
     serialize_fn = staticmethod(mov_svc.serialize_ajuste)
     create_fn = staticmethod(mov_svc.crear_ajuste)
@@ -93,6 +101,7 @@ class AjusteListCreateView(ListCreateView):
 
 class TransferenciaListCreateView(ListCreateView):
     model = Transferencia
+    permisos = {"GET": "inventario:transferencias:leer", "POST": "inventario:transferencias:crear"}
     ordering = ("-created_at",)
     serialize_fn = staticmethod(mov_svc.serialize_transferencia)
     create_fn = staticmethod(mov_svc.crear_transferencia)
@@ -104,6 +113,7 @@ class TransferenciaListCreateView(ListCreateView):
 
 class KardexListView(ReadOnlyListView):
     model = VKardex
+    permiso_requerido = "inventario:kardex:leer"
     ordering = ("-ocurrido_en", "-movimiento_id")
     serialize_fn = staticmethod(consulta_svc.serialize_kardex)
     filter_fields = ("sku", "almacen", "tipo")
@@ -114,7 +124,9 @@ class KardexListView(ReadOnlyListView):
 # ---------------------------------------------------------------- RF-63
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AlertaStockMinimoListView(LoginRequiredMixin, View):
+class AlertaStockMinimoListView(PermissionRequiredMixin, View):
+    permiso_requerido = "inventario:alertas:leer"
+
     def get(self, request):
         qs = tenant_scoped(AlertaStockMinimo.objects.all(), request).order_by("-disparada_en")
 
@@ -134,7 +146,9 @@ class AlertaStockMinimoListView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class AlertaStockMinimoAckView(LoginRequiredMixin, View):
+class AlertaStockMinimoAckView(PermissionRequiredMixin, View):
+    permiso_requerido = "inventario:alertas:notificar"
+
     def post(self, request, pk):
         try:
             alerta = tenant_scoped(AlertaStockMinimo.objects.all(), request).get(pk=pk)
@@ -149,6 +163,7 @@ class AlertaStockMinimoAckView(LoginRequiredMixin, View):
 
 class ValuacionInventarioListView(ReadOnlyListView):
     model = VValuacionInventario
+    permiso_requerido = "inventario:valuacion:leer"
     ordering = ("producto", "almacen")
     serialize_fn = staticmethod(consulta_svc.serialize_valuacion)
     tenant_via_id = True

@@ -2,9 +2,9 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.utils import timezone
 
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 from inventario.models import AjusteInventario, Almacen, Movimiento, Producto, StockActual, Transferencia
@@ -105,7 +105,7 @@ def crear_movimiento_manual(data, request):
         if costo_unitario < 0:
             raise BusinessRuleError("costo_unitario debe ser >= 0.", campo="costo_unitario")
 
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         if tipo == "salida":
             _validar_stock_suficiente(tenant, producto, almacen, cantidad)
 
@@ -162,7 +162,7 @@ def crear_ajuste(data, request):
     tipo_movimiento = "ajuste_positivo" if cantidad > 0 else "ajuste_negativo"
     cantidad_abs = abs(cantidad)
 
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         if cantidad < 0:
             _validar_stock_suficiente(tenant, producto, almacen, cantidad_abs)
 
@@ -218,7 +218,7 @@ def crear_transferencia(data, request):
             "El almacen origen y destino no pueden ser el mismo.", campo="almacen_destino_id"
         )
 
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         _validar_stock_suficiente(tenant, producto, almacen_origen, cantidad)
 
         transferencia = Transferencia.objects.create(

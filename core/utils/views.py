@@ -8,9 +8,10 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from core.models import Tenant
-from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, get_tenant, tenant_scoped
+from core.utils.auth import UNAUTHORIZED, get_tenant, tenant_scoped
 from core.utils.errors import BusinessRuleError
 from core.utils.pagination import paginate
+from core.utils.permissions import PermissionDeniedError, PermissionRequiredMixin
 
 TRUE_VALUES = {"1", "true", "si", "sí"}
 
@@ -36,17 +37,25 @@ def _apply_filters(qs, request, filter_fields, date_field):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CatalogListCreateView(LoginRequiredMixin, View):
+class CatalogListCreateView(PermissionRequiredMixin, View):
     """Base reutilizable para GET (lista paginada + busqueda + filtro
     ?activo=) y POST (alta) de un catalogo maestro. Cada app conecta su
     modelo y las funciones de su services/catalogo_service.py:
 
         class ProductoListCreateView(CatalogListCreateView):
             model = Producto
+            permisos = {
+                "GET": "inventario:productos:leer",
+                "POST": "inventario:productos:crear",
+            }
             search_fields = ("sku", "nombre")
             ordering = ("sku",)
             serialize_fn = staticmethod(svc.serialize_producto)
             create_fn = staticmethod(svc.crear_producto)
+
+    El permiso por metodo lo exige PermissionRequiredMixin, del que heredan
+    las cuatro clases base: declararlo es obligatorio, un metodo sin permiso
+    declarado responde 403.
     """
 
     model = None
@@ -79,6 +88,8 @@ class CatalogListCreateView(LoginRequiredMixin, View):
 
         try:
             obj = self.create_fn(data, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
         except Tenant.DoesNotExist:
@@ -88,7 +99,7 @@ class CatalogListCreateView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CatalogDetailView(LoginRequiredMixin, View):
+class CatalogDetailView(PermissionRequiredMixin, View):
     """Base reutilizable para PATCH (edicion parcial) y DELETE (baja
     logica) de un registro puntual, siempre acotado al tenant del JWT."""
 
@@ -113,6 +124,8 @@ class CatalogDetailView(LoginRequiredMixin, View):
 
         try:
             obj = self.edit_fn(obj, data, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
 
@@ -126,6 +139,8 @@ class CatalogDetailView(LoginRequiredMixin, View):
 
         try:
             obj = self.deactivate_fn(obj, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
 
@@ -133,7 +148,7 @@ class CatalogDetailView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ListCreateView(LoginRequiredMixin, View):
+class ListCreateView(PermissionRequiredMixin, View):
     """Base reutilizable para GET (lista paginada + filtros exactos) y POST
     (alta) de registros transaccionales acotados al tenant (movimientos,
     ajustes, transferencias, etc). A diferencia de CatalogListCreateView no
@@ -143,6 +158,10 @@ class ListCreateView(LoginRequiredMixin, View):
 
         class AjusteListCreateView(ListCreateView):
             model = AjusteInventario
+            permisos = {
+                "GET": "inventario:ajustes:leer",
+                "POST": "inventario:ajustes:crear",
+            }
             serialize_fn = staticmethod(svc.serialize_ajuste)
             create_fn = staticmethod(svc.crear_ajuste)
             filter_fields = ("producto_id", "almacen_id")
@@ -169,6 +188,8 @@ class ListCreateView(LoginRequiredMixin, View):
 
         try:
             obj = self.create_fn(data, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
         except Tenant.DoesNotExist:
@@ -178,7 +199,7 @@ class ListCreateView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ReadOnlyListView(LoginRequiredMixin, View):
+class ReadOnlyListView(PermissionRequiredMixin, View):
     """Base reutilizable para GET sobre modelos de solo lectura (vistas SQL
     como VKardex/VStockDisponible) o catalogos sin alta via API. Las vistas
     SQL de reportes exponen tenant_id crudo (no una FK `tenant`), asi que

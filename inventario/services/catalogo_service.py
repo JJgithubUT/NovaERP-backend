@@ -1,9 +1,9 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
 from django.utils import timezone
 
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 from inventario.models import Almacen, Producto
@@ -54,7 +54,7 @@ def crear_producto(data, request):
         raise BusinessRuleError("SKU ya existe en este tenant.", campo="sku")
 
     now = timezone.now()
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         producto = Producto.objects.create(
             id=uuid.uuid4(),
             tenant=tenant,
@@ -109,13 +109,15 @@ def editar_producto(producto, data, request):
             raise BusinessRuleError("stock_minimo debe ser >= 0.", campo="stock_minimo")
         producto.stock_minimo = stock_minimo
 
-    producto.save()
+    with audit_context(request, tenant_id=producto.tenant_id):
+        producto.save()
     return producto
 
 
 def dar_de_baja_producto(producto, request):
     producto.activo = False
-    producto.save(update_fields=["activo"])
+    with audit_context(request, tenant_id=producto.tenant_id):
+        producto.save(update_fields=["activo"])
     return producto
 
 
@@ -141,7 +143,7 @@ def crear_almacen(data, request):
             "Ya existe un almacen con ese nombre en este tenant.", campo="nombre"
         )
 
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         almacen = Almacen.objects.create(
             id=uuid.uuid4(),
             tenant=tenant,
@@ -168,11 +170,13 @@ def editar_almacen(almacen, data, request):
     if "ubicacion" in data:
         almacen.ubicacion = data["ubicacion"] or None
 
-    almacen.save()
+    with audit_context(request, tenant_id=almacen.tenant_id):
+        almacen.save()
     return almacen
 
 
 def dar_de_baja_almacen(almacen, request):
     almacen.activo = False
-    almacen.save(update_fields=["activo"])
+    with audit_context(request, tenant_id=almacen.tenant_id):
+        almacen.save(update_fields=["activo"])
     return almacen

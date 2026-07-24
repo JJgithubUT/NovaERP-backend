@@ -1,10 +1,10 @@
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
 from django.utils import timezone
 
 from compras.models import OrdenCompra, OrdenCompraLinea, RecepcionLinea, RecepcionMercancia
+from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
 from finanzas.models import CuentaPorPagar
@@ -72,7 +72,7 @@ def crear_recepcion(data, request):
         raise BusinessRuleError("La recepcion debe tener al menos una linea.", campo="lineas")
 
     now = timezone.now()
-    with transaction.atomic():
+    with audit_context(request, tenant_id=tenant.id):
         try:
             orden = OrdenCompra.objects.select_for_update().get(tenant=tenant, id=orden_id)
         except (OrdenCompra.DoesNotExist, ValueError):

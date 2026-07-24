@@ -5,6 +5,7 @@ from ventas.services import catalogo_service as svc
 
 class ClienteListCreateView(CatalogListCreateView):
     model = Cliente
+    permisos = {"GET": "ventas:clientes:leer", "POST": "ventas:clientes:crear"}
     search_fields = ("razon_social", "rfc_o_id_fiscal")
     ordering = ("razon_social",)
     serialize_fn = staticmethod(svc.serialize_cliente)
@@ -13,6 +14,7 @@ class ClienteListCreateView(CatalogListCreateView):
 
 class ClienteDetailView(CatalogDetailView):
     model = Cliente
+    permisos = {"PATCH": "ventas:clientes:editar", "DELETE": "ventas:clientes:eliminar"}
     serialize_fn = staticmethod(svc.serialize_cliente)
     edit_fn = staticmethod(svc.editar_cliente)
     deactivate_fn = staticmethod(svc.dar_de_baja_cliente)

@@ -860,6 +860,294 @@ Authorization: Bearer {{token}}
 ###
 
 ###########################################################
+# ROLES Y PERMISOS - RBAC (RF-10 a RF-15)
+###########################################################
+
+# catalogo maestro agrupado por dominio, con marca de inertes (RF-11/CA01-CA02)
+GET {{host}}/api/core/permisos/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-10: alta de rol personalizado
+POST {{host}}/api/core/roles/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"LECTOR_INVENTARIO",
+    "permisos":["inventario:productos:leer", "inventario:stock:leer"]
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("rolId", body.id);
+%}
+
+###
+
+# RF-10/CA03: sin permisos -> 422
+POST {{host}}/api/core/roles/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"SIN_PERMISOS",
+    "permisos":[]
+}
+
+###
+
+# RF-10/RN02: permiso fuera del catalogo maestro -> 422
+POST {{host}}/api/core/roles/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"INVENTADO",
+    "permisos":["ventas:loquesea:crear"]
+}
+
+###
+
+# RF-10/RN03: nombre duplicado en el tenant -> 422
+POST {{host}}/api/core/roles/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"LECTOR_INVENTARIO",
+    "permisos":["inventario:productos:leer"]
+}
+
+###
+
+# RF-11: roles del tenant con permisos, inertes y usuarios asignados
+GET {{host}}/api/core/roles/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-12: modificar el conjunto de permisos (surte efecto en la siguiente peticion)
+PATCH {{host}}/api/core/roles/{{rolId}}/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "permisos":["inventario:productos:leer", "inventario:productos:crear"]
+}
+
+###
+
+# RF-12/CA02: el rol de sistema TENANT_ADMIN no puede modificarse -> 403
+# (sustituir por el id real de TENANT_ADMIN en core.rol)
+PATCH {{host}}/api/core/roles/00000000-0000-0000-0000-000000000000/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "nombre":"OTRO_NOMBRE"
+}
+
+###
+
+# RF-14: asignar rol a un usuario
+POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/roles/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "roles":["{{rolId}}"]
+}
+
+###
+
+# RF-15: revocar rol
+DELETE {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/roles/{{rolId}}/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-13/CA01: con usuarios asignados se bloquea -> 422
+DELETE {{host}}/api/core/roles/{{rolId}}/
+Authorization: Bearer {{token}}
+
+###
+
+# RF-13: baja logica confirmada
+DELETE {{host}}/api/core/roles/{{rolId}}/?desactivar=true
+Authorization: Bearer {{token}}
+
+###
+
+# Autorizacion: usuario sin el permiso -> 403 con el codigo requerido
+# (tokenNoAdmin lo emite la seccion de RF-05, mas abajo)
+POST {{host}}/api/inventario/productos/
+Authorization: Bearer {{tokenNoAdmin}}
+Content-Type: application/json
+
+{
+    "sku":"DENEGADO",
+    "nombre":"No autorizado"
+}
+
+###
+
+###########################################################
+# ALTA Y ACTIVACION DE USUARIOS (RF-05)
+###########################################################
+
+# El rol a asignar debe existir en el tenant. /api/core/me/ devuelve los
+# nombres de rol del usuario autenticado, pero no sus ids: tomar el id de
+# TENANT_ADMIN de core.rol y ponerlo aqui.
+@rolId = 00000000-0000-0000-0000-000000000000
+@nuevoCorreo = qa.rf05@acme.com
+@nuevaPassword = Whatever12345!
+
+# alta -> 201, estado 'pendiente', sin password, notificacion en cola
+POST {{host}}/api/core/usuarios/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"{{nuevoCorreo}}",
+    "nombre_completo":"QA RF05",
+    "roles":["{{rolId}}"]
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("activacionToken", body.activacion_token);
+client.global.set("nuevoUsuarioId", body.id);
+%}
+
+###
+
+# sin roles -> 422 (RN04/CA03)
+POST {{host}}/api/core/usuarios/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"sin.roles@acme.com",
+    "nombre_completo":"Sin Roles"
+}
+
+###
+
+# correo ya registrado en el tenant -> 422 (RN02)
+POST {{host}}/api/core/usuarios/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"admin@acme.com",
+    "nombre_completo":"Duplicado",
+    "roles":["{{rolId}}"]
+}
+
+###
+
+# rol inexistente en este tenant -> 422 (RN06)
+POST {{host}}/api/core/usuarios/
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "correo":"rol.malo@acme.com",
+    "nombre_completo":"Rol Malo",
+    "roles":["11111111-1111-1111-1111-111111111111"]
+}
+
+###
+
+# el usuario pendiente no puede autenticarse todavia -> 401 (RN03)
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+    "tenant_slug":"{{tenant}}",
+    "correo":"{{nuevoCorreo}}",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# token invalido o vencido -> 422
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"basura",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# password bajo el minimo de config_seguridad_tenant -> 422 (RF-22)
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"{{activacionToken}}",
+    "password":"corta"
+}
+
+###
+
+# activacion -> 200, estado 'activo'
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"{{activacionToken}}",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# token de un solo uso: reintentar -> 422 (CA06)
+POST {{host}}/api/auth/activar/
+Content-Type: application/json
+
+{
+    "token":"{{activacionToken}}",
+    "password":"{{nuevaPassword}}"
+}
+
+###
+
+# ya activado: ahora si autentica -> 200
+POST {{host}}/api/auth/login/
+Content-Type: application/json
+
+{
+    "tenant_slug":"{{tenant}}",
+    "correo":"{{nuevoCorreo}}",
+    "password":"{{nuevaPassword}}"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("tokenNoAdmin", body.token);
+%}
+
+###
+
+# usuario sin rol TENANT_ADMIN dando de alta usuarios -> 403
+POST {{host}}/api/core/usuarios/
+Authorization: Bearer {{tokenNoAdmin}}
+Content-Type: application/json
+
+{
+    "correo":"otro@acme.com",
+    "nombre_completo":"Otro",
+    "roles":["{{rolId}}"]
+}
+
+###
+
+###########################################################
 # PRUEBAS DE SEGURIDAD
 ###########################################################
 

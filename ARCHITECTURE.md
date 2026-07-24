@@ -101,6 +101,25 @@ Client → POST /api/auth/login/ → Django calls core.intentar_login() → Post
 - **RF-09** (`GET /api/core/me/`): expone `usuario.ultimo_acceso` (CA03), tomado
   del último evento `LOGIN` de la bitácora; nunca expone contraseña/hash/tokens
   (CA02); roles vigentes (CA04).
+- **RF-21 / RF-23 / RF-24 auditoría y reportes** (`core/services/auditoria_service.py`):
+  - `GET /api/core/bitacora/` (`core:bitacora:leer`): consulta paginada de
+    `log_auditoria`, acotada al tenant (RN01), filtros por usuario/operación/
+    entidad/fecha (CA01), solo lectura (CA02, la tabla es append-only).
+  - `GET /api/core/bitacora/export/?formato=csv|pdf` (`core:bitacora:exportar`):
+    exporta la consulta (mismos filtros, RN01) a **CSV o PDF** (CA01) con
+    metadatos (quién/cuándo/filtros, CA02); la exportación se registra como
+    evento propio `EXPORT` (RN02/CA03). El PDF se genera con `reportlab` (Python
+    puro, añadido a requirements) vía el helper `_pdf_tabla`.
+  - `GET /api/core/reportes/actividad/` (`core:reportes:leer`): reporte por
+    usuario del tenant (RN01) — último acceso, nº de sesiones, nº de acciones CUD
+    auditadas, estado (CA01); filtros por fecha/departamento/puesto (CA02). Sin
+    `?formato=` devuelve JSON paginado; `?formato=csv|pdf` exporta el reporte
+    completo (CA03).
+  - **Segregación de funciones (RF-21/RN01/CA04)**: `asignar_roles` (RF-14)
+    rechaza que un usuario con `core:bitacora:leer` (Auditor) tenga a la vez
+    cualquier permiso de mutación (acción ≠ leer/exportar), con el mensaje de
+    CA04. Se mide sobre los permisos **explícitos** de los roles; el bypass de un
+    rol de sistema (TENANT_ADMIN) no cuenta.
 - **RF-22 políticas de seguridad** (`GET`/`PATCH`/`PUT /api/core/config-seguridad/`,
   permisos `core:politicas:leer` / `:editar`): el TENANT_ADMIN endurece su política
   dentro de los **límites de plataforma** (`config_service.LIMITES`; ej. longitud
@@ -159,6 +178,20 @@ Client → POST /api/auth/login/ → Django calls core.intentar_login() → Post
   `ACCOUNT_LOCKED` se emiten desde el orquestador con un único helper, como
   `INSERT` en `core.log_auditoria` (eventos de dominio que el trigger CUD no
   cubre). `LOGIN` alimenta `v_actividad_usuarios` (último acceso, RF-06/RF-23).
+- **Notificaciones (RF-25)**: la cola es `core.notificacion` (estado
+  `pendiente` → `enviada` / `en_cola_reintento` / `fallida`). Los servicios
+  **encolan** (nunca envían en línea, CA03: un fallo de envío no bloquea la
+  operación). La **entrega** la hace el worker `manage.py enviar_notificaciones`
+  (`notificacion_service.procesar_pendientes`), pensado para correr por cron cada
+  minuto (CA01); envía por correo con el framework de email de Django (backend
+  configurable por env — consola en dev, SMTP en prod; **sin librería nueva**) y
+  reintenta hasta `MAX_INTENTOS` antes de marcar `fallida`. Al dispararse un
+  evento de seguridad (bloqueo de cuenta) se notifica al usuario y a los
+  TENANT_ADMIN del tenant (RF-25 + RF-16/RN02); el cuerpo **nunca** incluye
+  credenciales ni tokens, solo la descripción y la referencia a la bitácora
+  (CA02). RN02 (no desactivable) se cumple trivialmente: no hay toggle.
+  **Pendiente**: canal webhook/Slack (RN01, opcional) — no hay configuración de
+  canal por tenant en el esquema de Fase 0.
 - **Bloqueo (RF-16/RN02)**: `core.registrar_intento_fallido` (contador 5 / 30 min
   por `config_seguridad_tenant`) devuelve el bloqueo resultante; si este intento
   lo disparó, el orquestador emite `ACCOUNT_LOCKED` (criticidad **ALTA**) y

@@ -1,12 +1,12 @@
 import datetime
-import uuid
 
 import jwt
 from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
-from core.models import LogAuditoria, Notificacion, Usuario
+from core.models import LogAuditoria, Usuario
+from core.services import notificacion_service
 from core.services import session_service
 from core.utils import secretos, totp
 from core.utils.audit import audit_context, client_ip, set_audit_user
@@ -74,26 +74,6 @@ def _registrar_evento(tipo, tenant, usuario_id, ip, entidad_id, criticidad="NORM
     )
 
 
-def _encolar_alerta_bloqueo(tenant, usuario_id, bloqueado_hasta, now):
-    """RF-16/RN02: al bloquear se envia un correo de alerta de seguridad. Aqui
-    solo se ENCOLA (estado 'pendiente'), reusando core.notificacion; la entrega
-    real es RF-25. No se implementa el envio."""
-    Notificacion.objects.create(
-        id=uuid.uuid4(),
-        tenant=tenant,
-        usuario_id=usuario_id,
-        canal="email",
-        asunto="Alerta de seguridad: cuenta bloqueada",
-        cuerpo=(
-            "Se bloqueo su cuenta tras varios intentos fallidos de inicio de "
-            f"sesion. Podra intentar de nuevo despues de {bloqueado_hasta}."
-        ),
-        estado="pendiente",
-        intentos=0,
-        created_at=now,
-    )
-
-
 def _emitir_reto(usuario_id, tenant_slug):
     """Reto OTP: JWT efimero firmado con SECRET_KEY. Solo acredita que la fase
     1 (password) se supero para este usuario; no concede acceso por si mismo."""
@@ -132,7 +112,9 @@ def _contar_fallo(tenant, usuario_id, ip):
         _registrar_evento(
             EVENTO_ACCOUNT_LOCKED, tenant, usuario_id, ip, usuario_id, criticidad="ALTA"
         )
-        _encolar_alerta_bloqueo(tenant, usuario_id, bloqueado_hasta, now)
+        # RF-25: notifica al usuario y a los TENANT_ADMIN (evento de seguridad).
+        usuario = Usuario.objects.get(id=usuario_id)
+        notificacion_service.notificar_bloqueo(None, tenant, usuario, bloqueado_hasta, now)
 
 
 def autenticar(request, tenant, tenant_slug, correo, password):

@@ -40,6 +40,18 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 # sin proxy delante, cualquier cliente puede falsear la IP que queda auditada.
 USE_X_FORWARDED_FOR = os.getenv('USE_X_FORWARDED_FOR', 'False').strip().lower() in ('1', 'true')
 
+# RF-25: entrega de notificaciones por correo. Solo se usa el framework de
+# email de Django (sin librerias nuevas). En dev el backend por defecto imprime
+# a consola; en produccion se configura SMTP por variables de entorno. El worker
+# `manage.py enviar_notificaciones` drena la cola (core.notificacion).
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@novaerp.local')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '25'))
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'False').strip().lower() in ('1', 'true')
+
 
 # Application definition
 

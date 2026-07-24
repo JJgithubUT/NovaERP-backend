@@ -8,6 +8,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from core.models import LogAuditoria, Modulo, Permiso, Rol, Tenant, Usuario
+from core.services import auditoria_service as auditoria_svc
 from core.services import auth_service
 from core.services import config_service as config_svc
 from core.services import rol_service as rol_svc
@@ -354,6 +355,56 @@ class UsuarioCerrarSesionesView(PermissionRequiredMixin, View):
 
         n = session_service.revocar_todas_de_usuario(request, usuario.id)
         return JsonResponse({"revocadas": n})
+
+
+# ------------------------------------------------------- RF-21 / RF-23 / RF-24
+
+@method_decorator(csrf_exempt, name="dispatch")
+class BitacoraView(PermissionRequiredMixin, View):
+    """RF-21: consulta de la bitacora de auditoria del tenant. Solo lectura."""
+
+    permiso_requerido = "core:bitacora:leer"
+
+    def get(self, request):
+        try:
+            return JsonResponse(auditoria_svc.consultar_bitacora(request))
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class BitacoraExportView(PermissionRequiredMixin, View):
+    """RF-24: exporta la consulta de la bitacora a CSV o PDF (?formato=). La
+    exportacion se audita como un evento propio (EXPORT)."""
+
+    permiso_requerido = "core:bitacora:exportar"
+
+    def get(self, request):
+        formato = (request.GET.get("formato") or "csv").strip().lower()
+        if formato not in auditoria_svc.FORMATOS_EXPORT:
+            return JsonResponse({"detail": "formato debe ser csv o pdf."}, status=400)
+        try:
+            return auditoria_svc.exportar_bitacora(request, formato)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ReporteActividadView(PermissionRequiredMixin, View):
+    """RF-23: reporte consolidado de actividad de usuarios del tenant. Sin
+    ?formato= devuelve JSON paginado; ?formato=csv|pdf exporta el reporte
+    completo a archivo (CA03)."""
+
+    permiso_requerido = "core:reportes:leer"
+
+    def get(self, request):
+        formato = (request.GET.get("formato") or "").strip().lower()
+        try:
+            if formato in auditoria_svc.FORMATOS_EXPORT:
+                return auditoria_svc.exportar_actividad(request, formato)
+            return JsonResponse(auditoria_svc.reporte_actividad(request))
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
 
 
 # ---------------------------------------------------------------- RF-22

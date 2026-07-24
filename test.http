@@ -1184,6 +1184,31 @@ Authorization: Bearer {{token}}
 ###
 
 ###########################################################
+# AUDITORIA Y REPORTES (RF-21 / RF-23 / RF-24)
+###########################################################
+
+# RF-21: consultar bitacora. Filtros ?usuario_id= ?operacion= ?entidad=
+# ?desde=&hasta=. Solo lectura. Exige core:bitacora:leer.
+GET {{host}}/api/core/bitacora/?operacion=LOGIN
+Authorization: Bearer {{token}}
+
+###
+
+# RF-24: exportar la consulta a CSV (mismos filtros). Se audita como EXPORT.
+# Exige core:bitacora:exportar. (PDF pendiente: requiere libreria.)
+GET {{host}}/api/core/bitacora/export/?entidad=usuario
+Authorization: Bearer {{token}}
+
+###
+
+# RF-23: reporte de actividad por usuario. Filtros ?desde=&hasta=
+# ?departamento= ?puesto=. Exige core:reportes:leer.
+GET {{host}}/api/core/reportes/actividad/
+Authorization: Bearer {{token}}
+
+###
+
+###########################################################
 # POLITICAS DE SEGURIDAD DEL TENANT (RF-22)
 ###########################################################
 

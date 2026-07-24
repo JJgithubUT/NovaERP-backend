@@ -3,7 +3,10 @@ from django.urls import path
 from core.views import (
     ActivarUsuarioView,
     LoginView,
+    BitacoraExportView,
+    BitacoraView,
     ConfigSeguridadView,
+    ReporteActividadView,
     LogoutView,
     RecuperarPasswordView,
     RestablecerPasswordView,
@@ -36,6 +39,11 @@ urlpatterns = [
     path('api/core/me/', MeView.as_view(), name='me'),
     # RF-22: politicas de seguridad del tenant
     path('api/core/config-seguridad/', ConfigSeguridadView.as_view(), name='config-seguridad'),
+    # RF-21 / RF-24: consulta y exportacion de la bitacora de auditoria
+    path('api/core/bitacora/', BitacoraView.as_view(), name='bitacora'),
+    path('api/core/bitacora/export/', BitacoraExportView.as_view(), name='bitacora-export'),
+    # RF-23: reporte de actividad de usuarios
+    path('api/core/reportes/actividad/', ReporteActividadView.as_view(), name='reporte-actividad'),
     # RF-19: autogestion de sesiones propias. 'cerrar-otras/' va antes del
     # patron <jti> para que no lo capture como si fuera un identificador.
     path('api/core/sesiones/', SesionListView.as_view(), name='sesion-list'),

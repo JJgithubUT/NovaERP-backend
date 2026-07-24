@@ -252,6 +252,31 @@ def desactivar_rol(rol, request):
 
 # ----------------------------------------------------------------- RF-14
 
+# RF-21/RN01/CA04: segregacion de funciones. Quien puede leer la bitacora
+# (Auditor) no puede tener a la vez permisos de mutacion. Se mide sobre los
+# permisos EXPLICITOS de los roles asignados; el bypass de un rol de sistema
+# (es_sistema) no cuenta, porque ese es el TENANT_ADMIN, no un Auditor.
+PERMISO_AUDITOR = "core:bitacora:leer"
+# Acciones de solo lectura; el resto (crear, editar, eliminar, cancelar,
+# aprobar, suspender, revocar, reset_mfa, notificar, autorizar, cerrar...) mutan.
+ACCIONES_LECTURA = {"leer", "exportar"}
+MSG_SEGREGACION = (
+    "El rol Auditor es incompatible con permisos de creacion, edicion o eliminacion."
+)
+
+
+def _valida_segregacion_auditor(roles):
+    """Lanza BusinessRuleError si el conjunto de permisos de `roles` mezcla el
+    permiso de auditoria con cualquier permiso de mutacion (RF-21/CA04)."""
+    codigos = set(
+        RolPermiso.objects.filter(rol__in=roles).values_list("permiso__codigo", flat=True)
+    )
+    if PERMISO_AUDITOR not in codigos:
+        return
+    if any(cod.rsplit(":", 1)[-1] not in ACCIONES_LECTURA for cod in codigos):
+        raise BusinessRuleError(MSG_SEGREGACION, campo="roles")
+
+
 def asignar_roles(usuario, data, request):
     """RF-14: vincula uno o varios roles a un usuario. RN01 (los privilegios
     son la union de todos sus roles) la resuelve PermissionResolver; aqui solo
@@ -279,6 +304,11 @@ def asignar_roles(usuario, data, request):
             "Uno o mas roles no existen en este tenant o estan inactivos.",
             campo="roles",
         )
+
+    # CA04: la segregacion se mide sobre el conjunto RESULTANTE (roles previos
+    # del usuario + los que se asignan ahora), no solo sobre los nuevos.
+    roles_actuales = list(Rol.objects.filter(core_usuario_rol_rol_set__usuario=usuario))
+    _valida_segregacion_auditor(set(roles_actuales) | set(roles))
 
     ya_asignados = set(
         UsuarioRol.objects.filter(usuario=usuario, rol__in=roles).values_list(

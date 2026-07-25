@@ -27,13 +27,29 @@ from core.views import (
     UsuarioRolCreateView,
     UsuarioRolDeleteView,
 )
-from core.views_sysadmin import SysAdminLoginView, SysAdminLogoutView
+from core.views_sysadmin import (
+    SysAdminLoginView,
+    SysAdminLogoutView,
+    TenantActivarView,
+    TenantDetailView,
+    TenantListCreateView,
+    TenantReactivarView,
+    TenantSuspenderView,
+)
 
 urlpatterns = [
     # Portal de plataforma (SysAdmin) — superficie separada de la de tenant.
     # Fundacion habilitante para RF-01..04 (gestion de tenants).
     path('api/admin/login/', SysAdminLoginView.as_view(), name='sysadmin-login'),
     path('api/admin/logout/', SysAdminLogoutView.as_view(), name='sysadmin-logout'),
+    # RF-01 (registrar) / RF-02 (consultar) / RF-03 (editar) tenants
+    path('api/admin/tenants/', TenantListCreateView.as_view(), name='tenant-list-create'),
+    path('api/admin/tenants/<str:pk>/', TenantDetailView.as_view(), name='tenant-detail'),
+    # RF-04: suspender / baja logica / reactivar tenant
+    path('api/admin/tenants/<str:pk>/suspender/', TenantSuspenderView.as_view(), name='tenant-suspender'),
+    path('api/admin/tenants/<str:pk>/reactivar/', TenantReactivarView.as_view(), name='tenant-reactivar'),
+    # RF-01 flujo de activacion (publico: el admin inicial aun no puede autenticarse)
+    path('api/auth/activar-tenant/', TenantActivarView.as_view(), name='tenant-activar'),
     path('api/auth/login/', LoginView.as_view(), name='login'),
     path('api/auth/otp/', OtpView.as_view(), name='otp'),
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),

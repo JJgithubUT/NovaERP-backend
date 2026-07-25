@@ -39,7 +39,9 @@ $$ LANGUAGE plpgsql;
 -- ----------------------------------------------------------------------------
 -- 1. MÓDULO 1 — ADMINISTRACIÓN DE MULTI-TENENCIA (RF-01..RF-04)
 -- ----------------------------------------------------------------------------
-CREATE TYPE core.tenant_estado AS ENUM ('activo', 'suspendido', 'baja_logica');
+-- 'pendiente': tenant recien registrado que aun no completa su activacion
+-- (RF-01). Ver sql/2026-07-25_rf01_04_tenants.sql (agregado por ALTER TYPE).
+CREATE TYPE core.tenant_estado AS ENUM ('activo', 'suspendido', 'baja_logica', 'pendiente');
 
 CREATE TABLE core.plan_comercial (
   id            SMALLINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
@@ -79,6 +81,28 @@ CREATE TABLE core.tenant_modulo (
   activo      BOOLEAN NOT NULL DEFAULT TRUE,
   activado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, modulo_id)
+);
+
+-- Dominios/palabras reservadas (RF-01/RN07/CA10). Ver sql/2026-07-25_rf01_04_tenants.sql.
+CREATE TABLE core.dominio_reservado (
+  palabra CITEXT PRIMARY KEY
+);
+
+-- Modulos incluidos por plan (RF-01/RN05): el nucleo (fase 0) en todos, los de
+-- negocio segun el plan. Ver sql/2026-07-25_rf01_04_tenants.sql.
+CREATE TABLE core.plan_modulo (
+  plan_id   SMALLINT NOT NULL REFERENCES core.plan_comercial(id) ON DELETE CASCADE,
+  modulo_id SMALLINT NOT NULL REFERENCES core.modulo(id) ON DELETE CASCADE,
+  PRIMARY KEY (plan_id, modulo_id)
+);
+
+-- Dependencias funcionales entre modulos (RF-03/RN05/RN07 cascada): depende_de
+-- debe estar activo para activar el modulo. Ver sql/2026-07-25_rf01_04_tenants.sql.
+CREATE TABLE core.modulo_dependencia (
+  modulo_id     SMALLINT NOT NULL REFERENCES core.modulo(id) ON DELETE CASCADE,
+  depende_de_id SMALLINT NOT NULL REFERENCES core.modulo(id) ON DELETE CASCADE,
+  PRIMARY KEY (modulo_id, depende_de_id),
+  CHECK (modulo_id <> depende_de_id)
 );
 
 -- ----------------------------------------------------------------------------
@@ -1401,6 +1425,34 @@ INSERT INTO core.modulo (codigo, nombre, fase) VALUES
   ('BPM', 'Motor de Workflow', 2),
   ('REGLAS', 'Motor de Reglas de Negocio', 2),
   ('BI', 'Reportería / BI', 2);
+
+-- Dominios reservados (RF-01/RN07/CA10)
+INSERT INTO core.dominio_reservado (palabra) VALUES
+  ('admin'), ('api'), ('www'), ('app'), ('mail'), ('smtp'), ('imap'), ('ftp'),
+  ('root'), ('system'), ('sys'), ('sysadmin'), ('superadmin'), ('novaerp'),
+  ('static'), ('cdn'), ('assets'), ('portal'), ('auth'), ('login'), ('logout'),
+  ('dashboard'), ('status'), ('support'), ('help'), ('billing'), ('test'),
+  ('staging'), ('dev'), ('internal')
+ON CONFLICT (palabra) DO NOTHING;
+
+-- Modulos por plan (RF-01/RN05): nucleo (fase 0) en todos; STARTER + INVENTARIO;
+-- BUSINESS/ENTERPRISE + toda la fase 1. Fase 2 fuera de alcance (RF-65..93).
+INSERT INTO core.plan_modulo (plan_id, modulo_id)
+SELECT p.id, m.id FROM core.plan_comercial p JOIN core.modulo m ON m.fase = 0
+ON CONFLICT DO NOTHING;
+INSERT INTO core.plan_modulo (plan_id, modulo_id)
+SELECT p.id, m.id FROM core.plan_comercial p JOIN core.modulo m ON m.codigo = 'INVENTARIO'
+WHERE p.codigo = 'STARTER' ON CONFLICT DO NOTHING;
+INSERT INTO core.plan_modulo (plan_id, modulo_id)
+SELECT p.id, m.id FROM core.plan_comercial p JOIN core.modulo m ON m.fase = 1
+WHERE p.codigo IN ('BUSINESS', 'ENTERPRISE') ON CONFLICT DO NOTHING;
+
+-- Dependencias entre modulos en alcance (RF-03/RN05): ventas y compras dependen
+-- de inventario (ambos generan movimientos de stock).
+INSERT INTO core.modulo_dependencia (modulo_id, depende_de_id)
+SELECT m.id, d.id FROM core.modulo m, core.modulo d
+WHERE (m.codigo, d.codigo) IN (('VENTAS', 'INVENTARIO'), ('COMPRAS', 'INVENTARIO'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO core.permiso (dominio, recurso, accion, descripcion) VALUES
   ('ventas', 'cotizaciones', 'crear', 'Generar cotización'),

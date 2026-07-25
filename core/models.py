@@ -43,6 +43,34 @@ class Modulo(models.Model):
         managed = False
         db_table = '"core"."modulo"'
 
+class DominioReservado(models.Model):
+    # RF-01/RN07/CA10: dominios/palabras reservadas de plataforma.
+    palabra = models.TextField(db_column='palabra', primary_key=True)  # citext en PostgreSQL
+
+    class Meta:
+        managed = False
+        db_table = '"core"."dominio_reservado"'
+
+class PlanModulo(models.Model):
+    # RF-01/RN05: que modulos incluye cada plan comercial.
+    pk = models.CompositePrimaryKey('plan_id', 'modulo_id')
+    plan = models.ForeignKey('core.PlanComercial', on_delete=models.DO_NOTHING, db_column='plan_id', related_name='core_plan_modulo_plan_set')
+    modulo = models.ForeignKey('core.Modulo', on_delete=models.DO_NOTHING, db_column='modulo_id', related_name='core_plan_modulo_modulo_set')
+
+    class Meta:
+        managed = False
+        db_table = '"core"."plan_modulo"'
+
+class ModuloDependencia(models.Model):
+    # RF-03/RN05/RN07: depende_de debe estar activo para activar el modulo.
+    pk = models.CompositePrimaryKey('modulo_id', 'depende_de_id')
+    modulo = models.ForeignKey('core.Modulo', on_delete=models.DO_NOTHING, db_column='modulo_id', related_name='core_modulo_dependencia_modulo_set')
+    depende_de = models.ForeignKey('core.Modulo', on_delete=models.DO_NOTHING, db_column='depende_de_id', related_name='core_modulo_dependencia_depende_de_set')
+
+    class Meta:
+        managed = False
+        db_table = '"core"."modulo_dependencia"'
+
 class Notificacion(models.Model):
     id = models.UUIDField(db_column='id', primary_key=True)
     tenant = models.ForeignKey('core.Tenant', on_delete=models.DO_NOTHING, db_column='tenant_id', related_name='core_notificacion_tenant_set', blank=True, null=True)
@@ -158,7 +186,7 @@ class Tenant(models.Model):
     razon_social = models.TextField(db_column='razon_social')
     dominio_comercial = models.TextField(db_column='dominio_comercial')
     plan = models.ForeignKey('core.PlanComercial', on_delete=models.DO_NOTHING, db_column='plan_id', related_name='core_tenant_plan_set')
-    estado = models.CharField(db_column='estado', max_length=11, choices=[('activo', 'activo'), ('suspendido', 'suspendido'), ('baja_logica', 'baja_logica')])  # ENUM Postgres 'tenant_estado'
+    estado = models.CharField(db_column='estado', max_length=11, choices=[('activo', 'activo'), ('suspendido', 'suspendido'), ('baja_logica', 'baja_logica'), ('pendiente', 'pendiente')])  # ENUM Postgres 'tenant_estado'
     motivo_suspension = models.TextField(db_column='motivo_suspension', blank=True, null=True)
     created_at = models.DateTimeField(db_column='created_at')
     updated_at = models.DateTimeField(db_column='updated_at')

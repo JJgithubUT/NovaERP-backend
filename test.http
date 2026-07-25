@@ -1659,3 +1659,181 @@ Authorization: Bearer {{adminToken}}
 #    (usa {{token}} del login de tenant de dos fases de mas arriba)
 POST {{host}}/api/admin/logout/
 Authorization: Bearer {{token}}
+
+###
+
+###########################################################
+# MODULO 1 — ADMINISTRACION DE MULTI-TENENCIA (RF-01..RF-04)
+# Todo el bloque exige una sesion de SysAdmin: haz primero el login del portal
+# (seccion anterior, paso 1) para tener {{adminToken}} vivo.
+###########################################################
+
+@nuevoSlug = probadora
+@nuevoAdminCorreo = jefa@probadora.com
+
+# RF-01: registrar un tenant. Nace 'pendiente'; devuelve el token de activacion
+# (en dev; el worker de correo lo entrega al admin inicial). Guarda id y token.
+POST {{host}}/api/admin/tenants/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "slug": "{{nuevoSlug}}",
+  "razon_social": "Probadora SA de CV",
+  "dominio_comercial": "Servicios",
+  "correo": "{{nuevoAdminCorreo}}",
+  "nombre_completo": "Jefa Probadora",
+  "plan": "STARTER"
+}
+
+> {%
+const b = response.parsedBody;
+client.global.set("tenantId", b.id);
+client.global.set("activacionTenantToken", b.activacion_token);
+%}
+
+###
+
+# RF-01/CA10: dominio reservado -> 422 "Este dominio esta reservado..."
+POST {{host}}/api/admin/tenants/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "slug": "admin",
+  "razon_social": "Reservada SA",
+  "correo": "x@reservada.com",
+  "nombre_completo": "X",
+  "plan": "BUSINESS"
+}
+
+###
+
+# RF-01/RN04: correo ya usado en la plataforma (admin@acme.com) -> 422
+POST {{host}}/api/admin/tenants/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "slug": "otra-org",
+  "razon_social": "Otra Org SA",
+  "correo": "admin@acme.com",
+  "nombre_completo": "X",
+  "plan": "BUSINESS"
+}
+
+###
+
+# RF-01 flujo de activacion (PUBLICO, sin token de sesion): el admin inicial fija
+# su contrasena; en cascada el usuario Y el tenant pasan a 'activo'.
+POST {{host}}/api/auth/activar-tenant/
+Content-Type: application/json
+
+{
+  "token": "{{activacionTenantToken}}",
+  "password": "ClaveSegura2026"
+}
+
+###
+
+# RF-02: listar tenants (paginado, filtros ?estado= ?plan= ?search= ?orden= ?desc=)
+GET {{host}}/api/admin/tenants/?search=probadora&orden=created_at&desc=true
+Authorization: Bearer {{adminToken}}
+
+###
+
+# RF-02/CA05: detalle de un tenant (modulos activos, licencias)
+GET {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+
+###
+
+# RF-03: editar datos generales (renombrar). No afecta datos existentes.
+PATCH {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "razon_social": "Probadora Renombrada SA"
+}
+
+###
+
+# RF-03/CA08: activar un modulo cuya dependencia no esta activa -> 422
+# (STARTER trae INVENTARIO; VENTAS no esta en STARTER -> primero falla por plan)
+PATCH {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "modulos": { "activar": ["VENTAS"] }
+}
+
+###
+
+# RF-03: subir a BUSINESS (incluye ventas/compras) y activar VENTAS (su
+# dependencia INVENTARIO ya esta activa). Dos cambios en un PATCH.
+PATCH {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "plan": "BUSINESS",
+  "modulos": { "activar": ["VENTAS"] }
+}
+
+###
+
+# RF-03/RN07/CA09: desactivar INVENTARIO (del que depende VENTAS) SIN cascada
+# -> 422 con requiere_confirmar_cascada=true y la lista de modulos_afectados.
+PATCH {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "modulos": { "desactivar": ["INVENTARIO"] }
+}
+
+###
+
+# RF-03: la misma desactivacion CON confirmacion de cascada -> 200
+# (apaga INVENTARIO y sus dependientes en un solo proceso atomico).
+PATCH {{host}}/api/admin/tenants/{{tenantId}}/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "modulos": { "desactivar": ["INVENTARIO"] },
+  "confirmar_cascada": true
+}
+
+###
+
+# RF-04: suspender el tenant (tipo cumplimiento/administrativa + motivo).
+# Invalida todas las sesiones de sus usuarios y bloquea su login.
+POST {{host}}/api/admin/tenants/{{tenantId}}/suspender/
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "tipo": "administrativa",
+  "motivo": "Impago del periodo"
+}
+
+###
+
+# RF-04/RN05: reactivar el tenant suspendido (sin perdida de informacion)
+POST {{host}}/api/admin/tenants/{{tenantId}}/reactivar/
+Authorization: Bearer {{adminToken}}
+
+###
+
+# RF-04: dar de baja logica (?baja=true). Reversible con reactivar.
+POST {{host}}/api/admin/tenants/{{tenantId}}/suspender/?baja=true
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "tipo": "administrativa",
+  "motivo": "Cierre de cuenta"
+}

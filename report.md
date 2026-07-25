@@ -1,6 +1,6 @@
 # NovaERP Backend — Reporte de estado del proyecto
 
-**Fecha:** 2026-07-24
+**Fecha:** 2026-07-25
 **Alcance del proyecto:** RF-01 a RF-64 (ERS v3.0, IEEE 830). Los RF-65 a RF-93 están **fuera de alcance**.
 **Stack:** Django 6.0 + PostgreSQL (modelos `managed=False`, lógica de negocio en triggers/funciones), autenticación JWT + TOTP, RBAC por permisos, auditoría transversal.
 
@@ -10,13 +10,13 @@
 
 | Estado | Nº de RF | % |
 |---|---|---|
-| ✅ **Completo** | 45 | 70 % |
+| ✅ **Completo** | 49 | 77 % |
 | 🟡 **Parcial** | 0 | 0 % |
-| ⛔ **Bloqueado** | 4 | 6 % |
+| ⛔ **Bloqueado** | 0 | 0 % |
 | ⚪ **No iniciado** | 15 | 23 % |
 | **Total** | **64** | 100 % |
 
-- **Núcleo transversal (Módulos 1–7) completo**, salvo los tenants (RF-01–04), **bloqueados** por una dependencia que ningún RF del alcance resuelve (autenticación de SysAdmin).
+- **Núcleo transversal (Módulos 1–7) completo**, incluidos los tenants (RF-01–04): el bloqueo anterior (autenticación de SysAdmin, no definida por ningún RF del alcance) se resolvió construyendo esa **infraestructura habilitante** — el portal de plataforma del SysAdmin (ver §4.8). Ya no queda ningún RF bloqueado.
 - **Módulos de negocio:** Inventario (10) 100 %, Compras (9) 100 %, Ventas/CRM (8) solo los catálogos de cliente; el bloque transaccional de Ventas (RF-30–44) está **sin iniciar** — es el único frente grande pendiente.
 - Varios RF están **Completos con una desviación documentada y aprobada** respecto a la letra de la ERS (ver §4). En todos los casos se implementó la lectura técnicamente correcta y ninguna CA obligatoria quedó incumplida.
 
@@ -37,14 +37,16 @@
 
 ## 3. Estado por módulo
 
-### Módulo 1 — Administración de Multi-tenencia (RF-01–04)
+### Módulo 1 — Administración de Multi-tenencia (RF-01–04) — **completo** 🧪
 
-| RF | Nombre | Estado | Nota |
-|---|---|---|---|
-| RF-01 | Registrar tenant | ⛔ Bloqueado | Precondición "SysAdmin autenticado". Ningún RF 01-64 define la superficie de autenticación de SysAdmin (`core.sysadmin` no tiene login; RF-16 es login de usuario de tenant). El modelo, las tablas y el multi-tenant existen; falta esa dependencia arquitectónica. |
-| RF-02 | Consultar tenants | ⛔ Bloqueado | Ídem. |
-| RF-03 | Editar tenant / activar módulos | ⛔ Bloqueado | Ídem. |
-| RF-04 | Suspender / baja lógica de tenant | ⛔ Bloqueado | Ídem. |
+> **Desbloqueado (2026-07-25).** El bloqueo (autenticación de SysAdmin, no cubierta por ningún RF del alcance) se resolvió construyendo el **portal de plataforma del SysAdmin** como infraestructura habilitante: login/logout con sesión persistida propia (`core.sesion_sysadmin`), separada de la de tenant. Ver §4.8.
+
+| RF | Nombre | Estado | Verif. | Nota / reajuste |
+|---|---|---|---|---|
+| RF-01 | Registrar tenant | ✅ Completo | 🧪 | Alta atómica: tenant en `pendiente` + config de seguridad + rol TENANT_ADMIN + admin inicial `pendiente` con token de activación (24 h) + módulos del plan. Valida unicidad de razón social/dominio/correo a nivel plataforma (RN03/RN04), formato `[a-z0-9-]` 3-50 y **palabras reservadas** (RN07/CA10). Activación por endpoint público dedicado (`/api/auth/activar-tenant/`): fija contraseña y en cascada pasa usuario **y** tenant a `activo` (evento `INICIALIZACION_ENTORNO`). **Reajuste:** el `slug` es el "dominio comercial" gobernado por RN03/RN07/CA03; MFA en primer login (§4.1). |
+| RF-02 | Consultar tenants | ✅ Completo | 🧪 | `GET /api/admin/tenants/[<id>/]` cross-tenant, paginado (máx. 50), búsqueda razón social/dominio/id, filtros estado/plan/fecha, orden (CA02-04); detalle con módulos activos y consumo de licencias (CA05). CA06 (usuario de tenant → 401) por separación de superficies. |
+| RF-03 | Editar tenant / activar módulos | ✅ Completo | 🧪 | `PATCH` de datos generales, plan y módulos. Núcleo no desactivable (RN03); solo se activan módulos del plan (RN05); dependencias validadas (CA08, tabla `modulo_dependencia`); **desactivación en cascada** con confirmación explícita que enumera los dependientes afectados (RN07/CA09). |
+| RF-04 | Suspender / baja lógica de tenant | ✅ Completo *(desviación)* | 🧪 | `POST .../suspender/` (+`?baja=true`) y `.../reactivar/`. Invalida **todas** las sesiones de los usuarios del tenant (CA02), bloquea login y API (el validador ya rechaza tenant no-`activo`), reversible (RN05). **Desviación (§4.9):** el bloqueo diferenciado de exportación por tipo (RN06/CA07) no aplica — no hay endpoint de exportación de datos de negocio que bloquear; el tipo se audita. |
 
 ### Módulo 2 — Gestión de Usuarios (RF-05–09) — **completo** 🧪
 
@@ -194,17 +196,27 @@ Todas fueron analizadas, justificadas y aprobadas; en cada caso se implementó l
 ### 4.7 RF-23 / RF-24 — Formato PDF
 - Se autorizó añadir `reportlab` (Python puro, sin dependencias del sistema) para generar PDF, además de CSV. Es la única librería nueva incorporada en todo el proyecto.
 
+### 4.8 RF-01–04 — Portal de plataforma del SysAdmin (infraestructura habilitante)
+- **Contexto:** ningún RF del alcance (01–64) define cómo se autentica el SysAdmin, pero RF-01–04 lo tienen como precondición. Se construyó esa superficie como infraestructura habilitante, con paridad de seguridad con el resto del sistema (sesión persistida = fuente de verdad de la revocación, decisión del Sprint 5).
+- **Implementado:** `core.sesion_sysadmin` (tabla propia, sin tenant ni FK a `core.usuario`, porque el SysAdmin vive fuera de la multi-tenencia); login/logout (`/api/admin/login|logout/`); JWT con `typ:"sysadmin"` sin `tid`; el middleware ramifica por `typ` y expone `request.sysadmin_id`; `SysAdminRequiredMixin` (no pasa por RBAC, que es por tenant); `sysadmin_context` fija `app.is_sysadmin='true'` (RLS) y deja el actor fuera del GUC de usuario para no violar la FK del trigger de auditoría; eventos de plataforma manuales (`LOGIN`/`LOGIN_FAILED`/`LOGOUT` y, para tenants, `CREATE_TENANT`/`UPDATE_TENANT`/`TENANT_SUSPEND`/`TENANT_BAJA`/`TENANT_REACTIVATE`/`INICIALIZACION_ENTORNO`) que nombran al SysAdmin responsable. Bootstrap: `manage.py crear_sysadmin` (credenciales por env para CI, idempotente sin clobber, hash en DB).
+- **Decisiones aprobadas:** login de **una fase, sin MFA** por ahora (la columna `sysadmin.mfa_secret` queda reservada) y **sin bloqueo por intentos** (RN02) — `core.sysadmin` no tiene contador de intentos; los fallos se **auditan** (visibilidad de fuerza bruta) pero no se cuentan todavía. Ambos son diferidos documentados, no incumplimientos de una CA del alcance (RF-01–04 no especifican estos detalles).
+
+### 4.9 RF-04 — Bloqueo de exportación por tipo de suspensión
+- **ERS (RN06/CA07):** una suspensión de tipo *cumplimiento* debe bloquear la exportación de datos del tenant; una *administrativa* la deja con periodo de gracia.
+- **Implementado:** el `tipo` (cumplimiento/administrativa) y el motivo se validan y se **auditan**, pero el bloqueo diferenciado de exportación no se aplica porque **no existe endpoint de exportación de datos de negocio del TENANT_ADMIN** que bloquear (RF-24 exporta la bitácora de auditoría, no datos de negocio). Cuando exista ese endpoint (bloque de Ventas/Finanzas), consultará el estado/tipo del tenant. Ninguna CA obligatoria del alcance queda incumplida.
+
 ---
 
 ## 5. Dependencias y bloqueos
 
 | Bloqueo / dependencia | RF afectados | Naturaleza |
 |---|---|---|
-| Autenticación de SysAdmin no definida por RF-01–64 | RF-01, 02, 03, 04 | Bloqueo arquitectónico dentro del alcance. |
+| ~~Autenticación de SysAdmin no definida por RF-01–64~~ | ~~RF-01, 02, 03, 04~~ | **Resuelto (2026-07-25):** portal de plataforma del SysAdmin construido como infraestructura habilitante (§4.8). Ya no hay RF bloqueados. |
 | Módulo de Workflow / motor de aprobaciones (Fase 1) | RF-08 (RN06/CA07), RF-60 (umbral) | La ERS lo difiere explícitamente fuera de Fase 0. |
 | Finanzas avanzada / factura de proveedor (RF-75) | RF-50 (conciliación ±2 %) | Fuera de alcance RF-01–64. |
 | Motor de reglas (RF-88) | RF-52 (parametrización avanzada) | Fuera de alcance. |
 | Configuración de canal/privacidad por tenant | RF-25 (webhook/Slack), RF-06 (privacidad) | No existe en el esquema de Fase 0. |
+| Endpoint de exportación de datos de negocio | RF-04 (bloqueo de exportación por tipo, RN06/CA07) | Depende del bloque de Ventas/Finanzas; sin endpoint que bloquear todavía (§4.9). |
 
 ---
 
@@ -221,10 +233,12 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 | `sql/2026-07-24_rf16_login_validador_puro.sql` | RF-16 | `intentar_login` como validador puro (sin escrituras); `registrar_intento_fallido` devuelve el bloqueo. |
 | `sql/2026-07-24_rf16_reset_mfa_permiso.sql` | RF-07/16 | Permiso `core:usuarios:reset_mfa`. |
 | `sql/2026-07-24_rf08_login_mensaje_suspendido.sql` | RF-08 | Mensaje específico de cuenta suspendida en el login. |
+| `sql/2026-07-25_sysadmin_sesion.sql` | RF-01..04 (infra) | `core.sesion_sysadmin` (sesión del portal de plataforma) + `intentar_login_sysadmin` (validador puro). |
+| `sql/2026-07-25_rf01_04_tenants.sql` | RF-01..04 | Estado `pendiente` del tenant (ALTER TYPE), `core.dominio_reservado`, `core.plan_modulo` (módulos por plan), `core.modulo_dependencia` (dependencias entre módulos). |
 
-**Servicios nuevos (Django):** `core/services/` — `usuario_service`, `rol_service`, `session_service`, `auth_service` (orquestador), `config_service`, `auditoria_service`, `notificacion_service`.
-**Utilidades nuevas:** `core/utils/` — `permissions`, `audit`, `totp`, `secretos`.
-**Worker:** `manage.py enviar_notificaciones` (entrega de notificaciones, para cron).
+**Servicios nuevos (Django):** `core/services/` — `usuario_service`, `rol_service`, `session_service`, `auth_service` (orquestador), `config_service`, `auditoria_service`, `notificacion_service`, `sysadmin_session_service`, `sysadmin_auth_service`, `tenant_service`.
+**Utilidades nuevas:** `core/utils/` — `permissions`, `audit` (incl. `sysadmin_context`), `totp`, `secretos`. **Mixin:** `SysAdminRequiredMixin` (portal de plataforma).
+**Workers / comandos:** `manage.py enviar_notificaciones` (entrega de notificaciones, para cron); `manage.py crear_sysadmin` (bootstrap del SysAdmin, credenciales por env).
 **Librería nueva:** `reportlab` (única dependencia añadida; exportación PDF).
 
 ---
@@ -233,14 +247,14 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 
 - Todos los RF marcados 🧪 tienen **suites de pruebas automatizados ejecutados contra la base PostgreSQL real** (no solo `manage.py check`), cubriendo reglas de negocio, seguridad, autorización por permiso (403), aislamiento por tenant y auditoría.
 - Los RF marcados 🔎 (ventas/compras/inventario) se verificaron con suites que ejercen el CRUD/flujo transaccional, la autorización por permiso y las reglas de negocio clave (bloqueo de baja por saldo, stock no negativo, umbral de aprobación, atomicidad de transferencia, CxP automática).
-- Los scripts de prueba viven en el directorio de trabajo temporal (harness de desarrollo), no en el repositorio. `test.http` documenta las peticiones de ejemplo de cada endpoint.
-- **Nota de datos de dev:** por acumulación de usuarios de prueba, el tenant de ejemplo llega al límite de licencias del plan (RF-05/RN05 funcionando correctamente); se libera suspendiendo usuarios de prueba.
+- El portal de plataforma (fundación SysAdmin y RF-01–04) tiene suites end-to-end contra la base real (login/logout/aislamiento de sesión; alta/activación/consulta de tenants; edición con dependencias y cascada de módulos; suspensión/baja/reactivación con revocación de sesiones), repetibles y verdes, más regresión del login de tenant de dos fases.
+- Los scripts de prueba viven en el directorio de trabajo temporal (harness de desarrollo), no en el repositorio. `test.http` documenta las peticiones de ejemplo de cada endpoint (incluida la sección del portal de plataforma).
+- **Nota de datos de dev:** por acumulación de usuarios de prueba, el tenant de ejemplo llega al límite de licencias del plan (RF-05/RN05 funcionando correctamente); se libera suspendiendo usuarios de prueba. En el portal de plataforma, como el diseño **append-only** hace indeleteable cualquier tenant/usuario con historial de auditoría, las pruebas usan **datos únicos por corrida** en vez de limpiar.
 
 ---
 
 ## 8. Lo que queda
 
-1. **Ventas / CRM transaccional (RF-30–44, 15 RF)** — único frente grande dentro del alcance. Modelo de datos ya existente; falta servicios/vistas. Incluye reglas de negocio no triviales (límite de crédito, folios, máquinas de estado oportunidad→cotización→pedido→factura→nota de crédito).
-2. **Tenants (RF-01–04)** — desbloquear requiere definir la autenticación de SysAdmin, hoy no cubierta por ningún RF del alcance. Requiere decisión de producto.
+1. **Ventas / CRM transaccional (RF-30–44, 15 RF)** — **único frente grande dentro del alcance.** Modelo de datos ya existente; falta servicios/vistas. Incluye reglas de negocio no triviales (límite de crédito, folios, máquinas de estado oportunidad→cotización→pedido→factura→nota de crédito).
 
-Con el núcleo transversal cerrado y verificado, el proyecto tiene una base sólida (autenticación de dos factores, RBAC, auditoría, sesiones, notificaciones) sobre la que construir el bloque de Ventas.
+Con el núcleo transversal cerrado y verificado —incluidos ya los tenants (RF-01–04) y el portal de plataforma del SysAdmin—, el proyecto tiene una base sólida (multi-tenencia administrable vía API, autenticación de dos factores, RBAC, auditoría, sesiones, notificaciones) sobre la que construir el bloque de Ventas, el único pendiente del alcance.

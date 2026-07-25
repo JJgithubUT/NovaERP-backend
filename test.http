@@ -1570,3 +1570,92 @@ Content-Type: application/json
     "correo":"admin@acme.com",
     "password":"incorrecta"
 }
+
+###
+
+###########################################################
+# PORTAL DE PLATAFORMA — SESION DEL SYSADMIN
+# Fundacion de auth del Administrador Global (fuera de todo tenant).
+# Habilita RF-01..04. Superficie separada de la de tenant:
+#   · token con typ="sysadmin", sesion en core.sesion_sysadmin
+#   · login de UNA fase, sin MFA por ahora (decision aprobada)
+#
+# REQUISITO PREVIO: sembrar el primer SysAdmin (no hay ninguno por defecto):
+#   SYSADMIN_EMAIL="root@novaerp.local" SYSADMIN_PASSWORD="PlataformaSegura2026!" \
+#     python manage.py crear_sysadmin
+# Ajusta las variables de abajo si usaste otras credenciales.
+###########################################################
+
+@adminEmail = root@novaerp.local
+@adminPassword = PlataformaSegura2026!
+
+# 1) LOGIN correcto (una fase) -> 200 + token de plataforma. Guarda adminToken.
+POST {{host}}/api/admin/login/
+Content-Type: application/json
+
+{
+  "correo": "{{adminEmail}}",
+  "password": "{{adminPassword}}"
+}
+
+> {%
+const body = response.parsedBody;
+client.global.set("adminToken", body.token);
+%}
+
+###
+
+# 2) LOGIN password incorrecta -> 401 (se audita LOGIN_FAILED, no se cuenta:
+#    sin bloqueo por ahora)
+POST {{host}}/api/admin/login/
+Content-Type: application/json
+
+{
+  "correo": "{{adminEmail}}",
+  "password": "incorrecta"
+}
+
+###
+
+# 3) LOGIN correo inexistente -> 401 (no revela existencia; se audita el correo
+#    intentado)
+POST {{host}}/api/admin/login/
+Content-Type: application/json
+
+{
+  "correo": "noexiste@novaerp.local",
+  "password": "loquesea1234"
+}
+
+###
+
+# 4) Endpoint protegido de plataforma CON token de sysadmin -> 200 (logout)
+#    Cierra la sesion en curso; el mismo token queda revocado de inmediato.
+POST {{host}}/api/admin/logout/
+Authorization: Bearer {{adminToken}}
+
+###
+
+# 5) Reusar el token DESPUES del logout -> 401 (sesion revocada; idempotente)
+POST {{host}}/api/admin/logout/
+Authorization: Bearer {{adminToken}}
+
+###
+
+# 6) Endpoint protegido de plataforma SIN token -> 401
+POST {{host}}/api/admin/logout/
+
+###
+
+# 7) AISLAMIENTO: token de sysadmin en un endpoint de tenant (/me) -> 401
+#    (un SysAdmin no es un usuario de tenant). Vuelve a hacer login (paso 1)
+#    para tener un adminToken vivo antes de probar esto.
+GET {{host}}/api/core/me/
+Authorization: Bearer {{adminToken}}
+
+###
+
+# 8) AISLAMIENTO inverso: token de TENANT en el endpoint de plataforma -> 401
+#    (usa {{token}} del login de tenant de dos fases de mas arriba)
+POST {{host}}/api/admin/logout/
+Authorization: Bearer {{token}}

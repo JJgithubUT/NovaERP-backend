@@ -52,6 +52,11 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'False').strip().lower() in ('1', 'true')
 
+# Expiracion del JWT del portal de plataforma (SysAdmin). El SysAdmin no
+# pertenece a ningun tenant, asi que no hay config_seguridad_tenant que leer:
+# la expiracion se configura por entorno aqui (default 8h, como los tenants).
+SYSADMIN_JWT_EXPIRACION_HORAS = int(os.getenv('SYSADMIN_JWT_EXPIRACION_HORAS', '8'))
+
 
 # Application definition
 

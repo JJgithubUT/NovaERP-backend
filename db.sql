@@ -174,6 +174,25 @@ CREATE TABLE core.sesion (
 );
 CREATE INDEX idx_sesion_usuario_activa ON core.sesion(usuario_id) WHERE revocada_en IS NULL;
 
+-- Sesion del SysAdmin (portal de plataforma). El SysAdmin vive fuera de todo
+-- tenant y no tiene fila en core.usuario, asi que no cabe en core.sesion
+-- (tenant_id/usuario_id NOT NULL). Tabla propia, misma semantica de revocacion.
+-- Ver sql/2026-07-25_sysadmin_sesion.sql. Tabla global de plataforma: sin RLS
+-- por tenant (como core.sysadmin) y sin trigger fn_auditar (sus eventos
+-- LOGIN/LOGOUT se registran como eventos de plataforma manuales).
+CREATE TABLE core.sesion_sysadmin (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sysadmin_id   UUID NOT NULL REFERENCES core.sysadmin(id) ON DELETE CASCADE,
+  jwt_id        TEXT NOT NULL UNIQUE,
+  ip_origen     INET,
+  user_agent    TEXT,
+  emitida_en    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expira_en     TIMESTAMPTZ NOT NULL,
+  revocada_en   TIMESTAMPTZ,
+  revocada_por  UUID REFERENCES core.sysadmin(id)
+);
+CREATE INDEX idx_sesion_sysadmin_activa ON core.sesion_sysadmin(sysadmin_id) WHERE revocada_en IS NULL;
+
 -- ----------------------------------------------------------------------------
 -- 4. MÓDULO 5 — AUDITORÍA Y CUMPLIMIENTO (RF-20..RF-21)
 -- ----------------------------------------------------------------------------
@@ -1565,6 +1584,36 @@ $$ LANGUAGE plpgsql;
 
 -- Uso:
 -- SELECT * FROM core.intentar_login('acme', 'admin@acme.com', 'CambiarEnPrimerLogin!');
+
+-- Validador PURO de credenciales del SysAdmin (portal de plataforma). Espejo de
+-- core.intentar_login pero contra core.sysadmin (sin tenant). No muta estado.
+-- Ver sql/2026-07-25_sysadmin_sesion.sql.
+CREATE OR REPLACE FUNCTION core.intentar_login_sysadmin(p_correo CITEXT, p_password TEXT)
+RETURNS TABLE(resultado TEXT, sysadmin_id UUID, mensaje TEXT) AS $$
+DECLARE
+  v_admin core.sysadmin%ROWTYPE;
+BEGIN
+  SELECT * INTO v_admin FROM core.sysadmin WHERE correo = p_correo;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT 'credenciales', NULL::UUID, 'Credenciales incorrectas';
+    RETURN;
+  END IF;
+
+  IF NOT v_admin.activo THEN
+    RETURN QUERY SELECT 'inactivo', v_admin.id, 'Cuenta de administrador desactivada';
+    RETURN;
+  END IF;
+
+  IF v_admin.password_hash IS NULL
+     OR NOT (v_admin.password_hash = crypt(p_password, v_admin.password_hash)) THEN
+    RETURN QUERY SELECT 'credenciales', v_admin.id, 'Credenciales incorrectas';
+    RETURN;
+  END IF;
+
+  RETURN QUERY SELECT 'ok', v_admin.id, 'OK';
+END;
+$$ LANGUAGE plpgsql;
 
 -- ----------------------------------------------------------------------------
 -- 8) EJEMPLO — RF-38/RN02: validar límite de crédito antes de confirmar pedido

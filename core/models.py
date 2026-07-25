@@ -134,6 +134,24 @@ class Sysadmin(models.Model):
         managed = False
         db_table = '"core"."sysadmin"'
 
+class SesionSysadmin(models.Model):
+    # Sesion del portal de plataforma (SysAdmin). Espejo de Sesion pero sin
+    # tenant y apuntando a core.sysadmin, no a core.usuario. Ver
+    # sql/2026-07-25_sysadmin_sesion.sql.
+    id = models.UUIDField(db_column='id', primary_key=True)
+    sysadmin = models.ForeignKey('core.Sysadmin', on_delete=models.DO_NOTHING, db_column='sysadmin_id', related_name='core_sesion_sysadmin_sysadmin_set')
+    jwt_id = models.TextField(db_column='jwt_id', unique=True)
+    ip_origen = models.GenericIPAddressField(db_column='ip_origen', blank=True, null=True)
+    user_agent = models.TextField(db_column='user_agent', blank=True, null=True)
+    emitida_en = models.DateTimeField(db_column='emitida_en')
+    expira_en = models.DateTimeField(db_column='expira_en')
+    revocada_en = models.DateTimeField(db_column='revocada_en', blank=True, null=True)
+    revocada_por = models.ForeignKey('core.Sysadmin', on_delete=models.DO_NOTHING, db_column='revocada_por', related_name='core_sesion_sysadmin_revocada_por_set', blank=True, null=True)
+
+    class Meta:
+        managed = False
+        db_table = '"core"."sesion_sysadmin"'
+
 class Tenant(models.Model):
     id = models.UUIDField(db_column='id', primary_key=True)
     slug = models.CharField(db_column='slug', max_length=255, unique=True)  # citext en PostgreSQL: comparaciones case-insensitive resueltas por la DB

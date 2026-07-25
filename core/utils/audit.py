@@ -8,6 +8,9 @@ from django.db import connection, transaction
 _GUC_USUARIO = "app.current_user_id"
 _GUC_TENANT = "app.current_tenant_id"
 _GUC_IP = "app.current_ip"
+# GUC que leen las politicas RLS (core.is_sysadmin): 'true' deja pasar al portal
+# de plataforma por encima del aislamiento por tenant. Ver 05_rls_multitenant.
+_GUC_SYSADMIN = "app.is_sysadmin"
 
 
 def client_ip(request):
@@ -71,6 +74,44 @@ def audit_context(request, tenant_id=None, usuario_id=None):
                     _GUC_USUARIO, str(usuario_id or ""),
                     _GUC_TENANT, str(tenant_id or ""),
                     _GUC_IP, client_ip(request) if request is not None else "",
+                ],
+            )
+        yield
+
+
+@contextmanager
+def sysadmin_context(request):
+    """Transaccion para las escrituras del portal de plataforma (SysAdmin).
+
+    Difiere de audit_context en dos puntos deliberados:
+
+      · Fija app.is_sysadmin='true' para que las politicas RLS
+        (core.is_sysadmin()) dejen operar cross-tenant: RF-01 inserta en
+        core.tenant / core.usuario / etc. de un tenant que aun se esta creando.
+
+      · NO fija app.current_user_id. El id del SysAdmin no vive en core.usuario y
+        log_auditoria.usuario_id tiene FK a core.usuario: publicarlo haria que el
+        trigger fn_auditar violara esa FK. Se deja vacio (el trigger escribe
+        usuario_id NULL, que la ERS ya contempla para eventos de plataforma) y el
+        actor SysAdmin se registra aparte con registrar_evento_plataforma().
+
+    El tenant afectado por la operacion (cuando lo hay, p. ej. RF-01..04) se
+    pasa como tenant_id para que las escrituras sobre tablas de ese tenant
+    queden atribuidas a el en la bitacora.
+    """
+    tenant_id = getattr(request, "_sysadmin_tenant_id", None)
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT set_config(%s, %s, true),"
+                "       set_config(%s, %s, true),"
+                "       set_config(%s, %s, true),"
+                "       set_config(%s, %s, true)",
+                [
+                    _GUC_USUARIO, "",
+                    _GUC_TENANT, str(tenant_id or ""),
+                    _GUC_IP, client_ip(request) if request is not None else "",
+                    _GUC_SYSADMIN, "true",
                 ],
             )
         yield

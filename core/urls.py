@@ -27,8 +27,13 @@ from core.views import (
     UsuarioRolCreateView,
     UsuarioRolDeleteView,
 )
+from core.views_sysadmin import SysAdminLoginView, SysAdminLogoutView
 
 urlpatterns = [
+    # Portal de plataforma (SysAdmin) — superficie separada de la de tenant.
+    # Fundacion habilitante para RF-01..04 (gestion de tenants).
+    path('api/admin/login/', SysAdminLoginView.as_view(), name='sysadmin-login'),
+    path('api/admin/logout/', SysAdminLogoutView.as_view(), name='sysadmin-logout'),
     path('api/auth/login/', LoginView.as_view(), name='login'),
     path('api/auth/otp/', OtpView.as_view(), name='otp'),
     path('api/auth/logout/', LogoutView.as_view(), name='logout'),

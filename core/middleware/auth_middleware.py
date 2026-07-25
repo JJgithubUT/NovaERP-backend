@@ -1,22 +1,32 @@
 import jwt
 from django.conf import settings
 
-from core.services import session_service
+from core.services import session_service, sysadmin_session_service
 
 
 class JWTCustomMiddleware:
-    """Decodifica el Bearer JWT y expone request.usuario_id / request.tenant_slug.
+    """Decodifica el Bearer JWT y expone la identidad en el request.
 
     Responde una sola pregunta: ¿esta sesion sigue siendo valida? Sin reglas de
     negocio, sin permisos, sin estados del usuario, sin auditoria. Dos puertas:
 
       1. firma y expiracion criptografica del token (barato, sin DB);
-      2. session_service.sesion_valida(jti): el token acredita identidad, pero
-         es core.sesion quien decide si esa identidad conserva una sesion viva
+      2. la sesion persistida decide si esa identidad conserva una sesion viva
          (contrato del Sprint 5). Una sesion revocada se rechaza aunque el JWT
          no haya expirado.
 
-    No bloquea: si algo falla deja usuario_id/tenant_slug en None y cada vista
+    Ramifica por el campo 'typ' del token en dos superficies excluyentes:
+
+      · typ == 'sysadmin' -> portal de plataforma. Valida contra
+        core.sesion_sysadmin y expone request.sysadmin_id. NO fija usuario_id ni
+        tenant_slug: el SysAdmin no pertenece a ningun tenant.
+      · en otro caso      -> sesion de tenant (comportamiento previo). Valida
+        contra core.sesion y expone usuario_id / tenant_slug.
+
+    Un token de tenant nunca activa la rama de plataforma y viceversa: son
+    almacenes de sesion distintos con un jti que no colisiona entre tablas.
+
+    No bloquea: si algo falla deja los tres identificadores en None y cada vista
     decide si exige autenticacion. Los tokens antiguos sin jti (previos a la
     persistencia de sesion) no pasan la segunda puerta y fuerzan un nuevo login.
     """
@@ -32,6 +42,10 @@ class JWTCustomMiddleware:
         # identidad de sesion, no logica de negocio; el middleware sigue solo
         # leyendo (no escribe ni audita).
         request.session_jti = None
+        # Identidad del portal de plataforma. Distinta de usuario_id a proposito:
+        # las vistas de tenant nunca deben tratar a un SysAdmin como usuario, ni
+        # las de plataforma tratar a un usuario como SysAdmin.
+        request.sysadmin_id = None
 
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
@@ -41,9 +55,18 @@ class JWTCustomMiddleware:
             except jwt.InvalidTokenError:
                 payload = None
 
-            if payload and session_service.sesion_valida(payload.get("jti")):
-                request.usuario_id = payload.get("sub")
-                request.tenant_slug = payload.get("tid")
-                request.session_jti = payload.get("jti")
+            if payload:
+                jti = payload.get("jti")
+                if payload.get("typ") == sysadmin_session_service.TYP_SYSADMIN:
+                    # La identidad se reconfirma contra la fila de sesion viva,
+                    # no se toma del 'sub' del token.
+                    sysadmin_id = sysadmin_session_service.sysadmin_id_de(jti)
+                    if sysadmin_id is not None:
+                        request.sysadmin_id = str(sysadmin_id)
+                        request.session_jti = jti
+                elif session_service.sesion_valida(jti):
+                    request.usuario_id = payload.get("sub")
+                    request.tenant_slug = payload.get("tid")
+                    request.session_jti = jti
 
         return self.get_response(request)

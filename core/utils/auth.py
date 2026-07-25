@@ -45,6 +45,23 @@ class LoginRequiredMixin:
         return super().dispatch(request, *args, **kwargs)
 
 
+class SysAdminRequiredMixin:
+    """Mixin para las vistas del portal de plataforma (SysAdmin). Exige que el
+    middleware haya reconocido una sesion de plataforma viva (request.sysadmin_id).
+
+    El SysAdmin es superusuario plano sobre su superficie (RF-01..04): no pasa
+    por PermissionResolver, que es por-tenant y por-rol. Simetricamente, una
+    sesion de tenant NO satisface este mixin (su request.sysadmin_id es None), y
+    las vistas de tenant no aceptan a un SysAdmin (su request.usuario_id es None):
+    las dos superficies quedan aisladas.
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if not getattr(request, "sysadmin_id", None):
+            return JsonResponse(UNAUTHORIZED, status=401)
+        return super().dispatch(request, *args, **kwargs)
+
+
 def tenant_scoped(queryset, request, lookup="tenant__slug"):
     """Helper para estandarizar el aislamiento por tenant en las futuras
     vistas de ventas/inventario/finanzas/etc, todas con FK `tenant`:

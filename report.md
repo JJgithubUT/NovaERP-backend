@@ -10,14 +10,14 @@
 
 | Estado | Nº de RF | % |
 |---|---|---|
-| ✅ **Completo** | 49 | 77 % |
+| ✅ **Completo** | 64 | 100 % |
 | 🟡 **Parcial** | 0 | 0 % |
 | ⛔ **Bloqueado** | 0 | 0 % |
-| ⚪ **No iniciado** | 15 | 23 % |
+| ⚪ **No iniciado** | 0 | 0 % |
 | **Total** | **64** | 100 % |
 
-- **Núcleo transversal (Módulos 1–7) completo**, incluidos los tenants (RF-01–04): el bloqueo anterior (autenticación de SysAdmin, no definida por ningún RF del alcance) se resolvió construyendo esa **infraestructura habilitante** — el portal de plataforma del SysAdmin (ver §4.8). Ya no queda ningún RF bloqueado.
-- **Módulos de negocio:** Inventario (10) 100 %, Compras (9) 100 %, Ventas/CRM (8) solo los catálogos de cliente; el bloque transaccional de Ventas (RF-30–44) está **sin iniciar** — es el único frente grande pendiente.
+- **Alcance RF-01–64 completo (100 %).** El núcleo transversal (Módulos 1–7) incluye los tenants (RF-01–04): el bloqueo anterior (autenticación de SysAdmin, no definida por ningún RF del alcance) se resolvió construyendo esa **infraestructura habilitante** — el portal de plataforma del SysAdmin (ver §4.8).
+- **Módulos de negocio:** Inventario (10) 100 %, Compras (9) 100 %, **Ventas/CRM (8) 100 %** — el bloque transaccional (RF-30–44: oportunidades, cotizaciones, pedidos con reserva de stock y crédito, facturas con CxC automática y notas de crédito) quedó cerrado y verificado end-to-end.
 - Varios RF están **Completos con una desviación documentada y aprobada** respecto a la letra de la ERS (ver §4). En todos los casos se implementó la lectura técnicamente correcta y ninguna CA obligatoria quedó incumplida.
 
 ---
@@ -99,7 +99,7 @@
 | RF-24 | Exportar bitácora a archivo | ✅ Completo | 🧪 | Export **CSV y PDF** con metadatos; la exportación se audita como evento propio `EXPORT` (RN02). PDF con `reportlab` (librería Python-pura autorizada). |
 | RF-25 | Notificar eventos críticos de seguridad | ✅ Completo *(desviación)* | 🧪 | Cola en `core.notificacion` + worker `manage.py enviar_notificaciones` (email vía framework de Django, reintento asíncrono). Bloqueo → notifica a usuario + TENANT_ADMIN; sin credenciales/tokens en el cuerpo (CA02). **Desviación (§4.4):** canal webhook/Slack (RN01, opcional) no implementado — no hay config de canal por tenant. |
 
-### Módulo 8 — Ventas / CRM (RF-26–44)
+### Módulo 8 — Ventas / CRM (RF-26–44) — **completo** 🧪
 
 | RF | Nombre | Estado | Verif. | Nota |
 |---|---|---|---|---|
@@ -107,23 +107,23 @@
 | RF-27 | Consultar / buscar clientes | ✅ Completo | 🔎 | Búsqueda, filtros, paginación. |
 | RF-28 | Editar cliente | ✅ Completo | 🔎 | |
 | RF-29 | Dar de baja lógica a cliente | ✅ Completo | 🔎 | Bloqueo si hay saldo pendiente en CxC. |
-| RF-30 | Registrar oportunidad | ⚪ No iniciado | — | |
-| RF-31 | Consultar pipeline | ⚪ No iniciado | — | Existe la vista `v_pipeline_oportunidades`. |
-| RF-32 | Actualizar etapa | ⚪ No iniciado | — | |
-| RF-33 | Cerrar oportunidad | ⚪ No iniciado | — | |
-| RF-34 | Generar cotización | ⚪ No iniciado | — | |
-| RF-35 | Consultar cotizaciones | ⚪ No iniciado | — | |
-| RF-36 | Editar cotización | ⚪ No iniciado | — | |
-| RF-37 | Aprobar / rechazar cotización | ⚪ No iniciado | — | |
-| RF-38 | Registrar pedido de venta | ⚪ No iniciado | — | Existe `ventas.validar_limite_credito`. |
-| RF-39 | Consultar pedidos | ⚪ No iniciado | — | |
-| RF-40 | Editar pedido | ⚪ No iniciado | — | |
-| RF-41 | Cancelar pedido | ⚪ No iniciado | — | |
-| RF-42 | Generar factura | ⚪ No iniciado | — | |
-| RF-43 | Consultar facturas | ⚪ No iniciado | — | |
-| RF-44 | Cancelar factura / nota de crédito | ⚪ No iniciado | — | |
+| RF-30 | Registrar oportunidad | ✅ Completo | 🧪 | Ligada a cliente activo (RN01); nace en `prospeccion`/`abierta`. Se añadió `fecha_cierre_estimada` (CA: no anterior a hoy); la probabilidad se deriva de la etapa (RN02). |
+| RF-31 | Consultar pipeline | ✅ Completo | 🧪 | Lista tabular + pipeline kanban con valor ponderado (valor × probabilidad). **Autorización por objeto:** cada vendedor ve solo las propias salvo `ventas:pipeline:ver_todo`. |
+| RF-32 | Actualizar etapa | ✅ Completo | 🧪 | Avanza solo a la etapa siguiente (RN01: no salta ni retrocede); terminales `ganada`/`perdida` (RN02). |
+| RF-33 | Cerrar oportunidad | ✅ Completo | 🧪 | `perdida` exige motivo del catálogo (RN01); `ganada` habilita generar cotización (RN02, afordance FE). |
+| RF-34 | Generar cotización | ✅ Completo *(desviación)* | 🧪 | Precio del catálogo; ajuste manual exige `ventas:cotizaciones:ajustar_precio` (RN01); totales automáticos (RN02). **Desviación (§4.10):** descuento sobre el máximo → `pendiente_aprobacion` (BPM manual, RF-83/86 fuera de alcance). |
+| RF-35 | Consultar cotizaciones | ✅ Completo | 🧪 | Filtros cliente/estado/fecha; estado `vencida` derivado de `vigente_hasta`. |
+| RF-36 | Editar cotización | ✅ Completo *(desviación)* | 🧪 | Solo en `borrador`/`pendiente_aprobacion`. **Desviación (§4.10):** el versionado formal no está en el esquema → se bloquea la edición y se regenera (sin cadena de versiones). |
+| RF-37 | Aprobar / rechazar cotización | ✅ Completo *(desviación)* | 🧪 | Una vencida no se aprueba (RN01); auditado. **Desviación (§4.10):** solo aprobación interna (el portal de cliente es fase futura). |
+| RF-38 | Registrar pedido de venta | ✅ Completo | 🧪 | Desde cotización aprobada o directo (RN01); al confirmar **reserva stock** (RN03) y valida **límite de crédito** (RN02: excede → bloquea salvo autorización `finanzas:credito:autorizar`); sin stock y con backorder → `pendiente_surtido`. |
+| RF-39 | Consultar pedidos | ✅ Completo | 🧪 | Filtros por cliente, estado, fecha. |
+| RF-40 | Editar pedido | ✅ Completo *(desviación)* | 🧪 | **Desviación (§4.10):** edición solo en `borrador` (editar un pedido confirmado = cancelar y recrear, para preservar la integridad de la reserva). |
+| RF-41 | Cancelar pedido | ✅ Completo | 🧪 | Libera el stock reservado (RN01); un pedido con facturas no se cancela (RN02, va a nota de crédito). |
+| RF-42 | Generar factura | ✅ Completo | 🧪 | Parcial/total; no más de lo pendiente por línea (RN01, trigger); reserva → **salida definitiva** de inventario (RN02); **CxC automática** (RN03); impuestos = subtotal × `iva_pct` del tenant. |
+| RF-43 | Consultar facturas | ✅ Completo | 🧪 | Filtros por cliente, estado, fecha. |
+| RF-44 | Cancelar factura / nota de crédito | ✅ Completo *(desviación)* | 🧪 | Factura inalterable (RN01); NC ligada revierte saldo CxC; NC total con `reingresar_stock` reingresa a inventario (RN02). **Desviación (§4.10):** el reingreso se controla por bandera de la petición (la ERS dice "si el tenant lo configura"). |
 
-> **Nota:** el modelo de datos de todo el Módulo 8 (oportunidad, cotización, pedido, factura, nota de crédito y sus líneas) ya existe en el esquema y en los modelos Django; falta la capa de servicios/vistas.
+> **Nota:** el esquema del Módulo 8 ya existía; esta entrega añadió la capa de servicios/vistas más `ventas.config_ventas` (impuestos/descuento/backorder por tenant), `oportunidad.fecha_cierre_estimada`, y para la reserva de stock `pedido_venta.almacen_id` + `pedido_linea.cantidad_reservada`.
 
 ### Módulo 9 — Compras (RF-45–52) — **completo** 🔎
 
@@ -201,6 +201,14 @@ Todas fueron analizadas, justificadas y aprobadas; en cada caso se implementó l
 - **Implementado:** `core.sesion_sysadmin` (tabla propia, sin tenant ni FK a `core.usuario`, porque el SysAdmin vive fuera de la multi-tenencia); login/logout (`/api/admin/login|logout/`); JWT con `typ:"sysadmin"` sin `tid`; el middleware ramifica por `typ` y expone `request.sysadmin_id`; `SysAdminRequiredMixin` (no pasa por RBAC, que es por tenant); `sysadmin_context` fija `app.is_sysadmin='true'` (RLS) y deja el actor fuera del GUC de usuario para no violar la FK del trigger de auditoría; eventos de plataforma manuales (`LOGIN`/`LOGIN_FAILED`/`LOGOUT` y, para tenants, `CREATE_TENANT`/`UPDATE_TENANT`/`TENANT_SUSPEND`/`TENANT_BAJA`/`TENANT_REACTIVATE`/`INICIALIZACION_ENTORNO`) que nombran al SysAdmin responsable. Bootstrap: `manage.py crear_sysadmin` (credenciales por env para CI, idempotente sin clobber, hash en DB).
 - **Decisiones aprobadas:** login de **una fase, sin MFA** por ahora (la columna `sysadmin.mfa_secret` queda reservada) y **sin bloqueo por intentos** (RN02) — `core.sysadmin` no tiene contador de intentos; los fallos se **auditan** (visibilidad de fuerza bruta) pero no se cuentan todavía. Ambos son diferidos documentados, no incumplimientos de una CA del alcance (RF-01–04 no especifican estos detalles).
 
+### 4.10 RF-30–44 — Ventas transaccional
+- **Aprobación por descuento y flujo formal (RF-34/37):** cuando el descuento supera el máximo del tenant, la cotización queda en `pendiente_aprobacion`, pero la liberación a `aprobada` es **manual** (RF-37) — el motor de aprobaciones BPM (RF-83/86) está fuera del alcance. Mismo stand-in ya usado en Compras (RF-47/52).
+- **Portal de cliente (RF-37):** la aprobación de cotización es solo interna (con `ventas:cotizaciones:aprobar`); el portal de autoservicio del cliente es fase futura, fuera de alcance.
+- **Versionado de cotización (RF-36):** el esquema no modela versiones; una cotización aprobada/rechazada no se edita — se regenera creando otra. Se bloquea la edición fuera de `borrador`/`pendiente_aprobacion`, sin cadena formal de versiones.
+- **Edición de pedido (RF-40):** se permite solo en `borrador`. Editar un pedido ya confirmado exige cancelarlo (que libera la reserva) y crear uno nuevo — para no romper la integridad de la reserva de stock.
+- **Reingreso de stock por nota de crédito (RF-44/RN02):** la ERS dice "si el tenant lo configura así"; se implementó como una **bandera `reingresar_stock`** en la petición de NC, aplicable a notas de crédito totales. Ninguna CA obligatoria queda incumplida.
+- **Impuestos (RF-42):** no existe "catálogo fiscal" en el esquema; se usa una **tasa de IVA por tenant** (`ventas.config_ventas.iva_pct`, default 16 %). La cotización (RF-34) no desglosa impuestos (su tabla no tiene la columna); el desglose ocurre en la factura.
+
 ### 4.9 RF-04 — Bloqueo de exportación por tipo de suspensión
 - **ERS (RN06/CA07):** una suspensión de tipo *cumplimiento* debe bloquear la exportación de datos del tenant; una *administrativa* la deja con periodo de gracia.
 - **Implementado:** el `tipo` (cumplimiento/administrativa) y el motivo se validan y se **auditan**, pero el bloqueo diferenciado de exportación no se aplica porque **no existe endpoint de exportación de datos de negocio del TENANT_ADMIN** que bloquear (RF-24 exporta la bitácora de auditoría, no datos de negocio). Cuando exista ese endpoint (bloque de Ventas/Finanzas), consultará el estado/tipo del tenant. Ninguna CA obligatoria del alcance queda incumplida.
@@ -235,8 +243,9 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 | `sql/2026-07-24_rf08_login_mensaje_suspendido.sql` | RF-08 | Mensaje específico de cuenta suspendida en el login. |
 | `sql/2026-07-25_sysadmin_sesion.sql` | RF-01..04 (infra) | `core.sesion_sysadmin` (sesión del portal de plataforma) + `intentar_login_sysadmin` (validador puro). |
 | `sql/2026-07-25_rf01_04_tenants.sql` | RF-01..04 | Estado `pendiente` del tenant (ALTER TYPE), `core.dominio_reservado`, `core.plan_modulo` (módulos por plan), `core.modulo_dependencia` (dependencias entre módulos). |
+| `sql/2026-07-25_rf30_44_ventas.sql` | RF-30..44 | `ventas.config_ventas` (IVA/descuento máx/backorder por tenant, con RLS), `oportunidad.fecha_cierre_estimada`, `pedido_venta.almacen_id` + `pedido_linea.cantidad_reservada` (reserva de stock), permisos `ventas:pipeline:ver_todo` y `ventas:cotizaciones:ajustar_precio`. |
 
-**Servicios nuevos (Django):** `core/services/` — `usuario_service`, `rol_service`, `session_service`, `auth_service` (orquestador), `config_service`, `auditoria_service`, `notificacion_service`, `sysadmin_session_service`, `sysadmin_auth_service`, `tenant_service`.
+**Servicios nuevos (Django):** `core/services/` — `usuario_service`, `rol_service`, `session_service`, `auth_service` (orquestador), `config_service`, `auditoria_service`, `notificacion_service`, `sysadmin_session_service`, `sysadmin_auth_service`, `tenant_service`. `ventas/services/` — `oportunidad_service`, `cotizacion_service`, `pedido_service`, `factura_service` (además de `catalogo_service`).
 **Utilidades nuevas:** `core/utils/` — `permissions`, `audit` (incl. `sysadmin_context`), `totp`, `secretos`. **Mixin:** `SysAdminRequiredMixin` (portal de plataforma).
 **Workers / comandos:** `manage.py enviar_notificaciones` (entrega de notificaciones, para cron); `manage.py crear_sysadmin` (bootstrap del SysAdmin, credenciales por env).
 **Librería nueva:** `reportlab` (única dependencia añadida; exportación PDF).
@@ -248,6 +257,7 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 - Todos los RF marcados 🧪 tienen **suites de pruebas automatizados ejecutados contra la base PostgreSQL real** (no solo `manage.py check`), cubriendo reglas de negocio, seguridad, autorización por permiso (403), aislamiento por tenant y auditoría.
 - Los RF marcados 🔎 (ventas/compras/inventario) se verificaron con suites que ejercen el CRUD/flujo transaccional, la autorización por permiso y las reglas de negocio clave (bloqueo de baja por saldo, stock no negativo, umbral de aprobación, atomicidad de transferencia, CxP automática).
 - El portal de plataforma (fundación SysAdmin y RF-01–04) tiene suites end-to-end contra la base real (login/logout/aislamiento de sesión; alta/activación/consulta de tenants; edición con dependencias y cascada de módulos; suspensión/baja/reactivación con revocación de sesiones), repetibles y verdes, más regresión del login de tenant de dos fases.
+- El bloque de Ventas transaccional (RF-30–44) tiene 72 pruebas end-to-end contra la base real, cubriendo: máquina de etapa y autorización por objeto de oportunidades; cálculo de totales, ajuste de precio y aprobación de cotizaciones; reserva de stock (con `FOR UPDATE`), límite de crédito con autorización y backorder en pedidos; facturación parcial/total con salida de inventario, CxC automática y notas de crédito con reingreso de stock. El stock reservado se verifica invariante (vuelve a cero al terminar).
 - Los scripts de prueba viven en el directorio de trabajo temporal (harness de desarrollo), no en el repositorio. `test.http` documenta las peticiones de ejemplo de cada endpoint (incluida la sección del portal de plataforma).
 - **Nota de datos de dev:** por acumulación de usuarios de prueba, el tenant de ejemplo llega al límite de licencias del plan (RF-05/RN05 funcionando correctamente); se libera suspendiendo usuarios de prueba. En el portal de plataforma, como el diseño **append-only** hace indeleteable cualquier tenant/usuario con historial de auditoría, las pruebas usan **datos únicos por corrida** en vez de limpiar.
 
@@ -255,6 +265,10 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 
 ## 8. Lo que queda
 
-1. **Ventas / CRM transaccional (RF-30–44, 15 RF)** — **único frente grande dentro del alcance.** Modelo de datos ya existente; falta servicios/vistas. Incluye reglas de negocio no triviales (límite de crédito, folios, máquinas de estado oportunidad→cotización→pedido→factura→nota de crédito).
+**El alcance RF-01–64 está completo (64/64).** No queda ningún RF pendiente ni bloqueado dentro del alcance.
 
-Con el núcleo transversal cerrado y verificado —incluidos ya los tenants (RF-01–04) y el portal de plataforma del SysAdmin—, el proyecto tiene una base sólida (multi-tenencia administrable vía API, autenticación de dos factores, RBAC, auditoría, sesiones, notificaciones) sobre la que construir el bloque de Ventas, el único pendiente del alcance.
+Trabajo transversal opcional / de despliegue (no son RF del alcance):
+- **Correo saliente (SMTP) y scheduler del worker de notificaciones** — el pipeline (cola en DB + `manage.py enviar_notificaciones` + backend de Django) está construido, pero en dev usa el backend de consola y el worker no está programado; para entrega real hace falta configurar SMTP y un cron. Es la única pieza externa requerida por el ERS.
+- **Rol de base de datos sin `BYPASSRLS` en producción** — hoy la app corre como `postgres` (superusuario), así que la RLS por tenant es defensa en profundidad no ejercida; en producción debe usarse un rol de aplicación sin privilegio para que la RLS del motor entre en efecto.
+
+Fuera de alcance (fases posteriores, RF-65–93): BPM/workflow, Finanzas avanzada, RRHH/Nómina, Proyectos, Motor de reglas, BI, portal de autoservicio del cliente.

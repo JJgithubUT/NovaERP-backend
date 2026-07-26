@@ -98,12 +98,25 @@ class NotaCredito(models.Model):
         managed = False
         db_table = '"ventas"."nota_credito"'
 
+class ConfigVentas(models.Model):
+    # RF-30..44: configuracion de ventas por tenant. Ver sql/2026-07-25_rf30_44_ventas.sql.
+    tenant = models.OneToOneField('core.Tenant', on_delete=models.DO_NOTHING, db_column='tenant_id', primary_key=True, related_name='ventas_config_ventas')
+    iva_pct = models.DecimalField(db_column='iva_pct', max_digits=5, decimal_places=2)
+    descuento_max_pct = models.DecimalField(db_column='descuento_max_pct', max_digits=5, decimal_places=2)
+    permite_backorder = models.BooleanField(db_column='permite_backorder')
+    updated_at = models.DateTimeField(db_column='updated_at')
+
+    class Meta:
+        managed = False
+        db_table = '"ventas"."config_ventas"'
+
 class Oportunidad(models.Model):
     id = models.UUIDField(db_column='id', primary_key=True)
     tenant = models.ForeignKey('core.Tenant', on_delete=models.DO_NOTHING, db_column='tenant_id', related_name='ventas_oportunidad_tenant_set')
     cliente = models.ForeignKey('ventas.Cliente', on_delete=models.DO_NOTHING, db_column='cliente_id', related_name='ventas_oportunidad_cliente_set')
     nombre = models.TextField(db_column='nombre')
     valor_estimado = models.DecimalField(db_column='valor_estimado', max_digits=14, decimal_places=2, blank=True, null=True)
+    fecha_cierre_estimada = models.DateField(db_column='fecha_cierre_estimada', blank=True, null=True)  # RF-30
     etapa = models.CharField(db_column='etapa', max_length=12, choices=[('prospeccion', 'prospeccion'), ('calificacion', 'calificacion'), ('propuesta', 'propuesta'), ('negociacion', 'negociacion'), ('cierre', 'cierre')])  # ENUM Postgres 'oportunidad_etapa'
     estado = models.CharField(db_column='estado', max_length=7, choices=[('abierta', 'abierta'), ('ganada', 'ganada'), ('perdida', 'perdida')])  # ENUM Postgres 'oportunidad_estado'
     motivo_perdida = models.TextField(db_column='motivo_perdida', blank=True, null=True)
@@ -121,6 +134,7 @@ class PedidoLinea(models.Model):
     producto = models.ForeignKey('inventario.Producto', on_delete=models.DO_NOTHING, db_column='producto_id', related_name='ventas_pedido_linea_producto_set')
     cantidad = models.DecimalField(db_column='cantidad', max_digits=12, decimal_places=3)
     cantidad_facturada = models.DecimalField(db_column='cantidad_facturada', max_digits=12, decimal_places=3)
+    cantidad_reservada = models.DecimalField(db_column='cantidad_reservada', max_digits=12, decimal_places=3)  # RF-38
     precio_unitario = models.DecimalField(db_column='precio_unitario', max_digits=14, decimal_places=4)
 
     class Meta:
@@ -135,6 +149,7 @@ class PedidoVenta(models.Model):
     cotizacion = models.ForeignKey('ventas.Cotizacion', on_delete=models.DO_NOTHING, db_column='cotizacion_id', related_name='ventas_pedido_venta_cotizacion_set', blank=True, null=True)
     estado = models.CharField(db_column='estado', max_length=17, choices=[('borrador', 'borrador'), ('confirmado', 'confirmado'), ('pendiente_surtido', 'pendiente_surtido'), ('cancelado', 'cancelado'), ('facturado_parcial', 'facturado_parcial'), ('facturado_total', 'facturado_total')])  # ENUM Postgres 'pedido_estado'
     total = models.DecimalField(db_column='total', max_digits=14, decimal_places=2)
+    almacen = models.ForeignKey('inventario.Almacen', on_delete=models.DO_NOTHING, db_column='almacen_id', related_name='ventas_pedido_venta_almacen_set', blank=True, null=True)  # RF-38
     created_at = models.DateTimeField(db_column='created_at')
     updated_at = models.DateTimeField(db_column='updated_at')
 

@@ -328,6 +328,7 @@ CREATE TABLE ventas.oportunidad (
   cliente_id     UUID NOT NULL REFERENCES ventas.cliente(id),
   nombre         TEXT NOT NULL,
   valor_estimado NUMERIC(14,2) CHECK (valor_estimado >= 0),
+  fecha_cierre_estimada DATE,   -- RF-30/CA: no puede ser anterior a hoy al crear
   etapa          ventas.oportunidad_etapa NOT NULL DEFAULT 'prospeccion',  -- RF-32
   estado         ventas.oportunidad_estado NOT NULL DEFAULT 'abierta',     -- RF-33
   motivo_perdida TEXT,   -- obligatorio si estado='perdida' (RN01), validado por trigger
@@ -384,6 +385,7 @@ CREATE TABLE ventas.pedido_venta (
   cotizacion_id  UUID REFERENCES ventas.cotizacion(id),   -- RN01: origina de cotización aprobada, u opcional
   estado         ventas.pedido_estado NOT NULL DEFAULT 'borrador',
   total          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  almacen_id     UUID REFERENCES inventario.almacen(id),   -- RF-38: almacen de surtido (se fija al confirmar)
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, folio)
@@ -397,6 +399,7 @@ CREATE TABLE ventas.pedido_linea (
   producto_id     UUID NOT NULL,   -- FK cruzada (03)
   cantidad        NUMERIC(12,3) NOT NULL CHECK (cantidad > 0),
   cantidad_facturada NUMERIC(12,3) NOT NULL DEFAULT 0,   -- controla "pendiente de facturar" (RF-42/RN01)
+  cantidad_reservada NUMERIC(12,3) NOT NULL DEFAULT 0,   -- RF-38: stock reservado por esta linea (se libera al cancelar / consume al facturar)
   precio_unitario NUMERIC(14,4) NOT NULL CHECK (precio_unitario >= 0),
   CONSTRAINT ck_cant_facturada CHECK (cantidad_facturada <= cantidad)
 );
@@ -433,6 +436,17 @@ CREATE TABLE ventas.nota_credito (
   motivo      TEXT NOT NULL,
   monto       NUMERIC(14,2) NOT NULL CHECK (monto > 0),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Configuracion de ventas por tenant (RF-30..44). impuestos, tope de descuento
+-- y politica de backorder. Ver sql/2026-07-25_rf30_44_ventas.sql. Al tener
+-- tenant_id, el bloque de RLS de 05_rls_multitenant la cubre automaticamente.
+CREATE TABLE ventas.config_ventas (
+  tenant_id         UUID PRIMARY KEY REFERENCES core.tenant(id) ON DELETE CASCADE,
+  iva_pct           NUMERIC(5,2) NOT NULL DEFAULT 16 CHECK (iva_pct BETWEEN 0 AND 100),
+  descuento_max_pct NUMERIC(5,2) NOT NULL DEFAULT 100 CHECK (descuento_max_pct BETWEEN 0 AND 100),
+  permite_backorder BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- ----------------------------------------------------------------------------
@@ -1460,7 +1474,9 @@ INSERT INTO core.permiso (dominio, recurso, accion, descripcion) VALUES
   ('ventas', 'clientes', 'crear', 'Registrar cliente'),
   ('inventario', 'movimientos', 'crear', 'Registrar movimiento manual de inventario'),
   ('finanzas', 'credito', 'autorizar', 'Autorizar excepción de límite de crédito'),
-  ('compras', 'ordenes_compra', 'aprobar', 'Aprobar orden de compra sobre el umbral');
+  ('compras', 'ordenes_compra', 'aprobar', 'Aprobar orden de compra sobre el umbral'),
+  ('ventas', 'pipeline', 'ver_todo', 'Ver el pipeline de oportunidades de todos los vendedores'),
+  ('ventas', 'cotizaciones', 'ajustar_precio', 'Ajustar manualmente el precio de una linea de cotizacion');
 
 -- ----------------------------------------------------------------------------
 -- 2) SEED: un tenant de ejemplo con su TENANT_ADMIN

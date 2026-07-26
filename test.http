@@ -1837,3 +1837,190 @@ Content-Type: application/json
   "tipo": "administrativa",
   "motivo": "Cierre de cuenta"
 }
+
+###
+
+###########################################################
+# MODULO 8 — VENTAS / CRM TRANSACCIONAL (RF-30..RF-44)
+# Requiere un usuario de tenant autenticado (login de dos fases de arriba,
+# {{token}}) con permisos de ventas. El TENANT_ADMIN (admin@acme.com) los tiene
+# todos por bypass. Usa un producto y almacen existentes del tenant acme.
+###########################################################
+
+@ventasToken = {{token}}
+@clienteVentas = REEMPLAZA_CON_UN_CLIENTE_ID
+@productoVentas = REEMPLAZA_CON_UN_PRODUCTO_ID
+@almacenVentas = REEMPLAZA_CON_UN_ALMACEN_ID
+
+# --- RF-30..33 Oportunidades ---
+
+# RF-30: registrar oportunidad (nace en 'prospeccion'/'abierta')
+POST {{host}}/api/ventas/oportunidades/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{
+  "cliente_id": "{{clienteVentas}}",
+  "nombre": "Venta trimestral",
+  "valor_estimado": "50000",
+  "fecha_cierre_estimada": "2026-12-31"
+}
+
+> {%
+client.global.set("oportunidadId", response.parsedBody.id);
+%}
+
+###
+
+# RF-31: pipeline kanban (conteo, valor total y ponderado por etapa)
+GET {{host}}/api/ventas/oportunidades/pipeline/
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RF-31: listado tabular (solo propias salvo ventas:pipeline:ver_todo)
+GET {{host}}/api/ventas/oportunidades/?estado=abierta
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RF-32: avanzar la etapa (solo a la siguiente en la secuencia)
+POST {{host}}/api/ventas/oportunidades/{{oportunidadId}}/etapa/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "etapa": "calificacion" }
+
+###
+
+# RF-33: cerrar como perdida (motivo del catalogo obligatorio) o ganada
+POST {{host}}/api/ventas/oportunidades/{{oportunidadId}}/cerrar/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "estado": "ganada" }
+
+###
+
+# --- RF-34..37 Cotizaciones ---
+
+# RF-34: generar cotizacion (precio del catalogo; totales automaticos)
+POST {{host}}/api/ventas/cotizaciones/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{
+  "cliente_id": "{{clienteVentas}}",
+  "descuento_pct": "10",
+  "vigente_hasta": "2026-12-31",
+  "lineas": [
+    { "producto_id": "{{productoVentas}}", "cantidad": "3" }
+  ]
+}
+
+> {%
+client.global.set("cotizacionId", response.parsedBody.id);
+%}
+
+###
+
+# RF-35: listar cotizaciones (?estado= ?cliente_id= ?vencida=true ?desde=&hasta=)
+GET {{host}}/api/ventas/cotizaciones/
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RF-36: editar cotizacion (solo borrador / pendiente_aprobacion)
+PATCH {{host}}/api/ventas/cotizaciones/{{cotizacionId}}/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "descuento_pct": "5" }
+
+###
+
+# RF-37: aprobar / rechazar (una vencida no se aprueba)
+POST {{host}}/api/ventas/cotizaciones/{{cotizacionId}}/resolver/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "decision": "aprobar" }
+
+###
+
+# --- RF-38..41 Pedidos ---
+
+# RF-38: crear pedido (desde cotizacion aprobada -> "cotizacion_id", o directo)
+POST {{host}}/api/ventas/pedidos/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{
+  "cliente_id": "{{clienteVentas}}",
+  "lineas": [
+    { "producto_id": "{{productoVentas}}", "cantidad": "3" }
+  ]
+}
+
+> {%
+client.global.set("pedidoId", response.parsedBody.id);
+%}
+
+###
+
+# RF-38: confirmar (reserva stock en el almacen; valida limite de credito).
+# Si excede el credito, agrega "autorizar_credito": true (requiere permiso
+# finanzas:credito:autorizar). Sin stock y con backorder -> pendiente_surtido.
+POST {{host}}/api/ventas/pedidos/{{pedidoId}}/confirmar/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "almacen_id": "{{almacenVentas}}" }
+
+###
+
+# RF-39: listar pedidos
+GET {{host}}/api/ventas/pedidos/?estado=confirmado
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RF-41: cancelar pedido (libera el stock reservado). Un pedido facturado -> 422
+POST {{host}}/api/ventas/pedidos/{{pedidoId}}/cancelar/
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# --- RF-42..44 Facturas y Notas de Credito ---
+
+# RF-42: generar factura de un pedido confirmado (parcial o total). Sin "lineas"
+# factura todo lo pendiente y reservado. Descuenta stock (salida) y crea la CxC.
+POST {{host}}/api/ventas/facturas/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{ "pedido_id": "{{pedidoId}}" }
+
+> {%
+client.global.set("facturaId", response.parsedBody.id);
+%}
+
+###
+
+# RF-43: listar / consultar facturas
+GET {{host}}/api/ventas/facturas/?cliente_id={{clienteVentas}}
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RF-44: nota de credito (revierte CxC; NC total con reingresar_stock=true
+# reingresa el stock facturado). La factura queda 'con_nota_credito'.
+POST {{host}}/api/ventas/facturas/{{facturaId}}/nota-credito/
+Authorization: Bearer {{ventasToken}}
+Content-Type: application/json
+
+{
+  "motivo": "Devolucion total",
+  "monto": "3364.00",
+  "reingresar_stock": true
+}

@@ -56,6 +56,15 @@ BEGIN
     RETURN;
   END IF;
 
+  -- RF-08/CA03: mensaje especifico para cuenta suspendida (incluido aqui para
+  -- que el replay de migraciones sea independiente del orden; misma logica que
+  -- 2026-07-24_rf08_login_mensaje_suspendido.sql y que db.sql).
+  IF v_usuario.estado = 'suspendido' THEN
+    RETURN QUERY SELECT 'inactivo', v_usuario.id,
+      'Su cuenta ha sido suspendida. Contacte al administrador.';
+    RETURN;
+  END IF;
+
   IF v_usuario.estado <> 'activo' THEN
     RETURN QUERY SELECT 'inactivo', v_usuario.id, 'Active su cuenta primero';
     RETURN;

@@ -385,7 +385,7 @@ CREATE TABLE ventas.pedido_venta (
   cotizacion_id  UUID REFERENCES ventas.cotizacion(id),   -- RN01: origina de cotización aprobada, u opcional
   estado         ventas.pedido_estado NOT NULL DEFAULT 'borrador',
   total          NUMERIC(14,2) NOT NULL DEFAULT 0,
-  almacen_id     UUID REFERENCES inventario.almacen(id),   -- RF-38: almacen de surtido (se fija al confirmar)
+  almacen_id     UUID,   -- RF-38: almacen de surtido (FK cruzada -> inventario.almacen en 04_fk_cruzadas)
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, folio)
@@ -879,6 +879,8 @@ ALTER TABLE ventas.cotizacion_linea
   ADD CONSTRAINT fk_cotlinea_producto FOREIGN KEY (producto_id) REFERENCES inventario.producto(id);
 ALTER TABLE ventas.pedido_linea
   ADD CONSTRAINT fk_pedlinea_producto FOREIGN KEY (producto_id) REFERENCES inventario.producto(id);
+ALTER TABLE ventas.pedido_venta
+  ADD CONSTRAINT fk_pedido_almacen FOREIGN KEY (almacen_id) REFERENCES inventario.almacen(id);
 
 -- Compras -> Inventario
 ALTER TABLE compras.orden_compra_linea

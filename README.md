@@ -73,7 +73,7 @@ $psql = "C:\Program Files\PostgreSQL\16\bin\psql.exe"
 $env:PGPASSWORD = "TU_PASSWORD_DE_POSTGRES"
 
 # 1) Esquema base + seed
-& $psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f db.sql
+& $psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f final.sql
 
 # 2) Migraciones incrementales, en orden de nombre
 Get-ChildItem sql\*.sql | Sort-Object Name | ForEach-Object {

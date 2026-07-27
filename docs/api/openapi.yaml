@@ -1,0 +1,890 @@
+openapi: 3.1.0
+info:
+  title: NovaERP API
+  version: "1.0.0"
+  description: >
+    API REST multi-tenant de NovaERP. Este documento cubre el **contrato
+    transversal** (autenticación, errores, paginación, permisos) y el módulo
+    **Ventas / CRM** como referencia modelo. Los demás módulos (núcleo,
+    plataforma/tenants, compras, inventario) siguen el mismo patrón.
+    Ver la guía de conceptos en GUIA-FRONTEND.md.
+
+servers:
+  - url: http://localhost:8000
+    description: Desarrollo
+
+tags:
+  - name: Autenticación
+    description: Login de dos fases (password + MFA), logout, recuperación.
+  - name: Núcleo
+    description: Contexto del usuario autenticado.
+  - name: Ventas — Clientes
+  - name: Ventas — Oportunidades
+  - name: Ventas — Cotizaciones
+  - name: Ventas — Pedidos
+  - name: Ventas — Facturas
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ─────────────────────────────────────────── Autenticación
+  /api/auth/login/:
+    post:
+      tags: [Autenticación]
+      summary: Login fase 1 (password → reto de segundo factor)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_slug, correo, password]
+              properties:
+                tenant_slug: { type: string, example: acme }
+                correo: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: >
+            Password válida. Devuelve un reto efímero. En el primer login
+            (mfa="enroll") incluye el secreto TOTP y la URI otpauth una sola vez.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reto: { type: string, description: JWT efímero (~5 min) para la fase 2 }
+                  mfa: { type: string, enum: [enroll, otp] }
+                  secret: { type: string, description: "Solo en mfa=enroll: secreto TOTP base32" }
+                  otpauth_uri: { type: string, description: "Solo en mfa=enroll: URI para generar el QR" }
+                  mensaje: { type: string }
+        "400": { $ref: "#/components/responses/AuthBadRequest" }
+        "401": { $ref: "#/components/responses/AuthUnauthorized" }
+
+  /api/auth/otp/:
+    post:
+      tags: [Autenticación]
+      summary: Login fase 2 (código TOTP → token de sesión)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reto, codigo]
+              properties:
+                reto: { type: string, description: El reto devuelto por /login }
+                codigo: { type: string, description: Código TOTP de 6 dígitos }
+      responses:
+        "200":
+          description: Autenticación completada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: JWT de sesión (Bearer) }
+                  mensaje: { type: string }
+        "400": { $ref: "#/components/responses/AuthBadRequest" }
+        "401": { $ref: "#/components/responses/AuthUnauthorized" }
+
+  /api/auth/logout/:
+    post:
+      tags: [Autenticación]
+      summary: Cierra la sesión actual (idempotente)
+      responses:
+        "200":
+          description: Sesión cerrada.
+          content:
+            application/json:
+              schema: { type: object, properties: { detail: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/auth/recuperar/:
+    post:
+      tags: [Autenticación]
+      summary: Solicita restablecer contraseña (respuesta genérica)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_slug, correo]
+              properties:
+                tenant_slug: { type: string }
+                correo: { type: string, format: email }
+      responses:
+        "200":
+          description: Mensaje genérico (no revela si el correo existe).
+          content:
+            application/json:
+              schema: { type: object, properties: { mensaje: { type: string } } }
+
+  /api/auth/restablecer/:
+    post:
+      tags: [Autenticación]
+      summary: Fija nueva contraseña con el token de un solo uso
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Contraseña restablecida; se invalidan las sesiones previas.
+          content:
+            application/json:
+              schema: { type: object, properties: { mensaje: { type: string } } }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  # ─────────────────────────────────────────── Núcleo
+  /api/core/me/:
+    get:
+      tags: [Núcleo]
+      summary: Contexto del usuario autenticado (para armar la UI)
+      responses:
+        "200":
+          description: Perfil, tenant, roles, permisos y módulos activos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  # ─────────────────────────────────────────── Ventas — Clientes
+  /api/ventas/clientes/:
+    get:
+      tags: [Ventas — Clientes]
+      summary: Lista de clientes (paginada)
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: search, in: query, schema: { type: string }, description: Busca en razón social / RFC }
+        - { name: activo, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Página de clientes.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagina"
+                  - type: object
+                    properties:
+                      results: { type: array, items: { $ref: "#/components/schemas/Cliente" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Ventas — Clientes]
+      summary: Registrar cliente
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClienteInput" }
+      responses:
+        "201":
+          description: Cliente creado.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Cliente" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/clientes/{id}/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    patch:
+      tags: [Ventas — Clientes]
+      summary: Editar cliente
+      requestBody:
+        content: { application/json: { schema: { $ref: "#/components/schemas/ClienteInput" } } }
+      responses:
+        "200": { description: Cliente actualizado., content: { application/json: { schema: { $ref: "#/components/schemas/Cliente" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+    delete:
+      tags: [Ventas — Clientes]
+      summary: Baja lógica del cliente
+      responses:
+        "200": { description: Cliente dado de baja., content: { application/json: { schema: { type: object, properties: { id: { type: string }, activo: { type: boolean } } } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  # ─────────────────────────────────────────── Ventas — Oportunidades
+  /api/ventas/oportunidades/:
+    get:
+      tags: [Ventas — Oportunidades]
+      summary: Lista de oportunidades (propias, o todas con ventas:pipeline:ver_todo)
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: estado, in: query, schema: { type: string, enum: [abierta, ganada, perdida] } }
+        - { name: etapa, in: query, schema: { $ref: "#/components/schemas/EtapaOportunidad" } }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: responsable_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Página de oportunidades.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagina"
+                  - type: object
+                    properties:
+                      results: { type: array, items: { $ref: "#/components/schemas/Oportunidad" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Ventas — Oportunidades]
+      summary: Registrar oportunidad
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cliente_id, nombre]
+              properties:
+                cliente_id: { type: string, format: uuid }
+                nombre: { type: string }
+                valor_estimado: { type: string, description: Decimal >= 0 }
+                fecha_cierre_estimada: { type: string, format: date, description: No anterior a hoy }
+      responses:
+        "201": { description: Oportunidad creada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/oportunidades/pipeline/:
+    get:
+      tags: [Ventas — Oportunidades]
+      summary: Pipeline kanban por etapa (conteo, valor total y ponderado)
+      responses:
+        "200":
+          description: Agregado por etapa.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  etapas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        etapa: { $ref: "#/components/schemas/EtapaOportunidad" }
+                        num_oportunidades: { type: integer }
+                        valor_total: { type: string }
+                        probabilidad: { type: integer }
+                        valor_ponderado: { type: string }
+                  valor_ponderado_total: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/ventas/oportunidades/{id}/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    get:
+      tags: [Ventas — Oportunidades]
+      summary: Detalle de oportunidad
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Ventas — Oportunidades]
+      summary: Editar datos (solo si está abierta; solo responsable / ver_todo)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre: { type: string }
+                valor_estimado: { type: string }
+                fecha_cierre_estimada: { type: string, format: date }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/oportunidades/{id}/etapa/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Oportunidades]
+      summary: Avanzar la etapa (solo a la siguiente en la secuencia)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [etapa]
+              properties:
+                etapa: { $ref: "#/components/schemas/EtapaOportunidad" }
+      responses:
+        "200": { description: Etapa actualizada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: >
+            Transición inválida (saltar/retroceder) o la oportunidad ya está
+            cerrada.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/ventas/oportunidades/{id}/cerrar/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Oportunidades]
+      summary: Cerrar como ganada o perdida (terminal)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [estado]
+              properties:
+                estado: { type: string, enum: [ganada, perdida] }
+                motivo_perdida:
+                  type: string
+                  description: Obligatorio si estado=perdida.
+                  enum: [Precio, Competencia, Tiempo, Presupuesto, "Sin respuesta", Otro]
+      responses:
+        "200": { description: Oportunidad cerrada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  # ─────────────────────────────────────────── Ventas — Cotizaciones
+  /api/ventas/cotizaciones/:
+    get:
+      tags: [Ventas — Cotizaciones]
+      summary: Lista de cotizaciones
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoCotizacion" } }
+        - { name: vencida, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Página de cotizaciones.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagina"
+                  - type: object
+                    properties:
+                      results: { type: array, items: { $ref: "#/components/schemas/Cotizacion" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Ventas — Cotizaciones]
+      summary: Generar cotización
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cliente_id, lineas]
+              properties:
+                cliente_id: { type: string, format: uuid }
+                oportunidad_id: { type: string, format: uuid }
+                descuento_pct: { type: string, description: "0–100" }
+                vigente_hasta: { type: string, format: date }
+                lineas:
+                  type: array
+                  items: { $ref: "#/components/schemas/CotizacionLineaInput" }
+      responses:
+        "201": { description: Cotización creada (borrador o pendiente_aprobacion)., content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "403":
+          description: Ajuste de precio manual sin permiso ventas:cotizaciones:ajustar_precio.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/cotizaciones/{id}/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    get:
+      tags: [Ventas — Cotizaciones]
+      summary: Detalle de cotización
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Ventas — Cotizaciones]
+      summary: Editar cotización (solo borrador / pendiente_aprobacion)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                descuento_pct: { type: string }
+                vigente_hasta: { type: string, format: date }
+                lineas: { type: array, items: { $ref: "#/components/schemas/CotizacionLineaInput" } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/cotizaciones/{id}/resolver/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Cotizaciones]
+      summary: Aprobar o rechazar (una vencida no se aprueba)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [aprobar, rechazar] }
+      responses:
+        "200": { description: Cotización resuelta., content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  # ─────────────────────────────────────────── Ventas — Pedidos
+  /api/ventas/pedidos/:
+    get:
+      tags: [Ventas — Pedidos]
+      summary: Lista de pedidos
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoPedido" } }
+      responses:
+        "200":
+          description: Página de pedidos.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagina"
+                  - type: object
+                    properties:
+                      results: { type: array, items: { $ref: "#/components/schemas/Pedido" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Ventas — Pedidos]
+      summary: Crear pedido (desde cotización aprobada o directo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Envía cotizacion_id (aprobada) O cliente_id + lineas.
+              properties:
+                cotizacion_id: { type: string, format: uuid }
+                cliente_id: { type: string, format: uuid }
+                lineas:
+                  type: array
+                  items:
+                    type: object
+                    required: [producto_id, cantidad]
+                    properties:
+                      producto_id: { type: string, format: uuid }
+                      cantidad: { type: string }
+                      precio_unitario: { type: string, description: Opcional; default del catálogo }
+      responses:
+        "201": { description: Pedido creado (borrador)., content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/pedidos/{id}/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    get:
+      tags: [Ventas — Pedidos]
+      summary: Detalle de pedido
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Ventas — Pedidos]
+      summary: Editar líneas (solo en borrador)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lineas:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      producto_id: { type: string, format: uuid }
+                      cantidad: { type: string }
+                      precio_unitario: { type: string }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/pedidos/{id}/confirmar/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Pedidos]
+      summary: Confirmar (reserva stock y valida crédito)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [almacen_id]
+              properties:
+                almacen_id: { type: string, format: uuid, description: Almacén de surtido }
+                autorizar_credito:
+                  type: boolean
+                  description: >
+                    Envía true para forzar la confirmación cuando el pedido excede
+                    el límite de crédito. Requiere el permiso finanzas:credito:autorizar.
+      responses:
+        "200":
+          description: Pedido confirmado o pendiente_surtido (backorder).
+          content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } }
+        "403":
+          description: autorizar_credito=true sin el permiso finanzas:credito:autorizar.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: >
+            Crédito excedido sin autorización, stock insuficiente (sin backorder),
+            o el pedido no está en borrador.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  /api/ventas/pedidos/{id}/cancelar/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Pedidos]
+      summary: Cancelar pedido (libera stock reservado)
+      responses:
+        "200": { description: Pedido cancelado., content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: El pedido tiene facturas emitidas (usar nota de crédito) o ya está cancelado.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+
+  # ─────────────────────────────────────────── Ventas — Facturas
+  /api/ventas/facturas/:
+    get:
+      tags: [Ventas — Facturas]
+      summary: Lista de facturas
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoFactura" } }
+        - { name: pedido_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Página de facturas.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Pagina"
+                  - type: object
+                    properties:
+                      results: { type: array, items: { $ref: "#/components/schemas/Factura" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Ventas — Facturas]
+      summary: Generar factura de un pedido confirmado (parcial o total)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pedido_id]
+              properties:
+                pedido_id: { type: string, format: uuid }
+                lineas:
+                  type: array
+                  description: Opcional; sin esto factura todo lo pendiente y reservado.
+                  items:
+                    type: object
+                    required: [pedido_linea_id, cantidad]
+                    properties:
+                      pedido_linea_id: { type: string, format: uuid }
+                      cantidad: { type: string }
+      responses:
+        "201": { description: Factura emitida (con CxC creada)., content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "404": { description: Pedido no encontrado. }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/facturas/{id}/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    get:
+      tags: [Ventas — Facturas]
+      summary: Detalle de factura
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/ventas/facturas/{id}/nota-credito/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Ventas — Facturas]
+      summary: Emitir nota de crédito (revierte CxC; opcional reingreso de stock)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [motivo, monto]
+              properties:
+                motivo: { type: string }
+                monto: { type: string, description: "> 0 y <= saldo de la CxC" }
+                reingresar_stock: { type: boolean, description: Solo aplica en NC total }
+      responses:
+        "200": { description: Nota de crédito emitida (factura → con_nota_credito)., content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token obtenido de /api/auth/otp/ (tenant) o /api/admin/login/ (SysAdmin).
+
+  parameters:
+    page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    pageSize: { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+    idPath: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    Unauthorized:
+      description: No autenticado o sesión expirada/revocada.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "No autorizado o sesion expirada" } } }
+    AuthUnauthorized:
+      description: Credenciales inválidas / cuenta bloqueada / inactiva.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorAuth" } } }
+    AuthBadRequest:
+      description: JSON inválido o faltan campos obligatorios.
+      content: { application/json: { schema: { $ref: "#/components/schemas/ErrorAuth" } } }
+    Forbidden:
+      description: Autenticado pero sin el permiso requerido.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "No cuenta con permisos para esta operacion", permiso_requerido: "ventas:pedidos:crear" } } }
+    NotFound:
+      description: No encontrado (o pertenece a otro tenant).
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "No encontrado" } } }
+    BusinessError:
+      description: Violación de una regla de negocio.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "cantidad excede lo pendiente de facturar.", campo: "lineas[0].cantidad", maximo_facturable: "2.000" } } }
+
+  schemas:
+    Error:
+      type: object
+      description: Envelope de error estándar (todo excepto /api/auth/*).
+      properties:
+        detail: { type: string }
+        campo: { type: string, description: "Solo en 422: campo del formulario en conflicto" }
+        permiso_requerido: { type: string, description: "Solo en 403 cuando aplica" }
+      additionalProperties: true
+    ErrorAuth:
+      type: object
+      description: Envelope de error de los endpoints de autenticación (usa 'mensaje').
+      properties:
+        mensaje: { type: string }
+    Pagina:
+      type: object
+      properties:
+        count: { type: integer }
+        page: { type: integer }
+        page_size: { type: integer }
+        num_pages: { type: integer }
+        results: { type: array, items: {} }
+
+    Me:
+      type: object
+      properties:
+        usuario:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            nombre_completo: { type: string }
+            correo: { type: string }
+            estado: { $ref: "#/components/schemas/EstadoUsuario" }
+            mfa_enrolado: { type: boolean }
+            ultimo_acceso: { type: string, format: date-time, nullable: true }
+        tenant:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            slug: { type: string }
+            razon_social: { type: string }
+            estado: { $ref: "#/components/schemas/EstadoTenant" }
+            plan: { type: string }
+        roles: { type: array, items: { type: string } }
+        es_admin: { type: boolean }
+        permisos:
+          type: array
+          items:
+            type: object
+            properties:
+              codigo: { type: string }
+              dominio: { type: string }
+              recurso: { type: string }
+              accion: { type: string }
+        modulos:
+          type: array
+          items:
+            type: object
+            properties:
+              codigo: { type: string }
+              nombre: { type: string }
+              fase: { type: integer }
+
+    Cliente:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        rfc_o_id_fiscal: { type: string, nullable: true }
+        razon_social: { type: string }
+        correo: { type: string, nullable: true }
+        telefono: { type: string, nullable: true }
+        limite_credito: { type: string }
+        activo: { type: boolean }
+    ClienteInput:
+      type: object
+      required: [razon_social]
+      properties:
+        rfc_o_id_fiscal: { type: string }
+        razon_social: { type: string }
+        correo: { type: string }
+        telefono: { type: string }
+        limite_credito: { type: string, description: ">= 0" }
+
+    Oportunidad:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        cliente_id: { type: string, format: uuid }
+        nombre: { type: string }
+        valor_estimado: { type: string, nullable: true }
+        fecha_cierre_estimada: { type: string, format: date, nullable: true }
+        etapa: { $ref: "#/components/schemas/EtapaOportunidad" }
+        estado: { type: string, enum: [abierta, ganada, perdida] }
+        probabilidad: { type: integer, description: Derivada de la etapa (0–100) }
+        valor_ponderado: { type: string }
+        motivo_perdida: { type: string, nullable: true }
+        responsable_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Cotizacion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: string }
+        cliente_id: { type: string, format: uuid }
+        oportunidad_id: { type: string, format: uuid, nullable: true }
+        estado: { $ref: "#/components/schemas/EstadoCotizacion" }
+        vencida: { type: boolean, description: Derivada de vigente_hasta }
+        subtotal: { type: string }
+        descuento_pct: { type: string }
+        total: { type: string }
+        vigente_hasta: { type: string, format: date, nullable: true }
+        lineas: { type: array, items: { $ref: "#/components/schemas/CotizacionLinea" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CotizacionLinea:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        producto_id: { type: string, format: uuid }
+        descripcion: { type: string }
+        cantidad: { type: string }
+        precio_unitario: { type: string }
+        importe: { type: string, description: Calculado (cantidad × precio) }
+    CotizacionLineaInput:
+      type: object
+      required: [producto_id, cantidad]
+      properties:
+        producto_id: { type: string, format: uuid }
+        cantidad: { type: string }
+        precio_unitario: { type: string, description: Opcional; ajuste manual requiere permiso }
+        descripcion: { type: string, description: Opcional; default el nombre del producto }
+
+    Pedido:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: string }
+        cliente_id: { type: string, format: uuid }
+        cotizacion_id: { type: string, format: uuid, nullable: true }
+        almacen_id: { type: string, format: uuid, nullable: true }
+        estado: { $ref: "#/components/schemas/EstadoPedido" }
+        total: { type: string }
+        lineas:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              producto_id: { type: string, format: uuid }
+              cantidad: { type: string }
+              cantidad_facturada: { type: string }
+              cantidad_reservada: { type: string }
+              precio_unitario: { type: string }
+              pendiente_facturar: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Factura:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        folio: { type: string }
+        pedido_id: { type: string, format: uuid }
+        cliente_id: { type: string, format: uuid }
+        estado: { $ref: "#/components/schemas/EstadoFactura" }
+        subtotal: { type: string }
+        impuestos: { type: string }
+        total: { type: string }
+        fecha_emision: { type: string, format: date-time }
+        cxc_saldo: { type: string, nullable: true, description: Saldo actual de la cuenta por cobrar }
+        lineas:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              pedido_linea_id: { type: string, format: uuid }
+              cantidad: { type: string }
+              precio_unitario: { type: string }
+              importe: { type: string }
+
+    # ── Enumeraciones ──
+    EstadoTenant: { type: string, enum: [pendiente, activo, suspendido, baja_logica] }
+    EstadoUsuario: { type: string, enum: [pendiente, activo, suspendido, pendiente_verificacion] }
+    EtapaOportunidad: { type: string, enum: [prospeccion, calificacion, propuesta, negociacion, cierre] }
+    EstadoCotizacion: { type: string, enum: [borrador, pendiente_aprobacion, aprobada, rechazada] }
+    EstadoPedido: { type: string, enum: [borrador, confirmado, pendiente_surtido, cancelado, facturado_parcial, facturado_total] }
+    EstadoFactura: { type: string, enum: [emitida, cancelada, con_nota_credito] }

@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -27,6 +28,42 @@ from inventario.models import (
 from inventario.services import catalogo_service as catalogo_svc
 from inventario.services import consulta_service as consulta_svc
 from inventario.services import movimiento_service as mov_svc
+
+
+class FiltroPorIdMixin:
+    """Traduce ?producto_id= y ?almacen_id= a las columnas de las vistas SQL.
+
+    v_stock_disponible, v_kardex y v_valuacion_inventario son vistas de reporte:
+    exponen el `sku` y el NOMBRE del almacen, no sus UUIDs. El frontend solo
+    tiene ids (es lo que devuelven los listados de catalogo), asi que sin esta
+    traduccion el filtro documentado no tendria forma de aplicarse sin cambiar
+    la definicion de la vista en Postgres.
+
+    La traduccion es segura porque ambas claves naturales son unicas por tenant
+    (lo validan crear_producto y crear_almacen). Un id inexistente, de otro
+    tenant o malformado devuelve cero filas: es un filtro, no un 404, y no debe
+    revelar si el registro existe en otro tenant.
+    """
+
+    campo_producto = "sku"
+    campo_almacen = "almacen"
+
+    def filtrar_extra(self, qs, request):
+        for param, campo, modelo, atributo in (
+            ("producto_id", self.campo_producto, Producto, "sku"),
+            ("almacen_id", self.campo_almacen, Almacen, "nombre"),
+        ):
+            valor = (request.GET.get(param) or "").strip()
+            if not valor:
+                continue
+            try:
+                obj = tenant_scoped(modelo.objects.all(), request).filter(pk=valor).first()
+            except (ValidationError, ValueError):
+                obj = None
+            if obj is None:
+                return qs.none()
+            qs = qs.filter(**{campo: getattr(obj, atributo)})
+        return qs
 
 
 class ProductoListCreateView(CatalogListCreateView):
@@ -77,7 +114,7 @@ class MovimientoListCreateView(ListCreateView):
 
 # ---------------------------------------------------------------- RF-59
 
-class StockDisponibleListView(ReadOnlyListView):
+class StockDisponibleListView(FiltroPorIdMixin, ReadOnlyListView):
     model = VStockDisponible
     permiso_requerido = "inventario:stock:leer"
     ordering = ("producto", "almacen")
@@ -111,7 +148,7 @@ class TransferenciaListCreateView(ListCreateView):
 
 # ---------------------------------------------------------------- RF-62
 
-class KardexListView(ReadOnlyListView):
+class KardexListView(FiltroPorIdMixin, ReadOnlyListView):
     model = VKardex
     permiso_requerido = "inventario:kardex:leer"
     ordering = ("-ocurrido_en", "-movimiento_id")
@@ -161,7 +198,7 @@ class AlertaStockMinimoAckView(PermissionRequiredMixin, View):
 
 # ---------------------------------------------------------------- RF-64
 
-class ValuacionInventarioListView(ReadOnlyListView):
+class ValuacionInventarioListView(FiltroPorIdMixin, ReadOnlyListView):
     model = VValuacionInventario
     permiso_requerido = "inventario:valuacion:leer"
     ordering = ("producto", "almacen")

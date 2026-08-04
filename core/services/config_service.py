@@ -30,9 +30,16 @@ DEFAULTS = {
 }
 
 
+def _limites():
+    return {k: {"min": v[0], "max": v[1]} for k, v in LIMITES.items()}
+
+
 def serialize_config(cfg):
+    """Un tenant sin fila de configuracion todavia devuelve los DEFAULTS, pero
+    con la MISMA forma que uno configurado: el frontend pinta el formulario a
+    partir de limites_plataforma y no debe tener que distinguir los dos casos."""
     if cfg is None:
-        return dict(DEFAULTS)
+        return {**DEFAULTS, "updated_at": None, "limites_plataforma": _limites()}
     return {
         "politica_password_min_len": cfg.politica_password_min_len,
         "politica_password_regex": cfg.politica_password_regex,
@@ -41,7 +48,7 @@ def serialize_config(cfg):
         "ventana_minutos": cfg.ventana_minutos,
         "bloqueo_minutos": cfg.bloqueo_minutos,
         "updated_at": cfg.updated_at.isoformat(),
-        "limites_plataforma": {k: {"min": v[0], "max": v[1]} for k, v in LIMITES.items()},
+        "limites_plataforma": _limites(),
     }
 
 

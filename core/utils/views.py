@@ -213,6 +213,13 @@ class ReadOnlyListView(PermissionRequiredMixin, View):
     date_field = None
     tenant_via_id = False
 
+    def filtrar_extra(self, qs, request):
+        """Gancho para filtros que no son una igualdad directa sobre una
+        columna. Lo usan las vistas SQL cuyas columnas no coinciden con lo que
+        manda el cliente (ver inventario.views.FiltroPorIdMixin). Por defecto no
+        toca el queryset."""
+        return qs
+
     def get(self, request):
         try:
             if self.tenant_via_id:
@@ -224,4 +231,5 @@ class ReadOnlyListView(PermissionRequiredMixin, View):
 
         qs = qs.order_by(*self.ordering)
         qs = _apply_filters(qs, request, self.filter_fields, self.date_field)
+        qs = self.filtrar_extra(qs, request)
         return JsonResponse(paginate(qs, request, self.serialize_fn))

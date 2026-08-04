@@ -75,8 +75,14 @@ flowchart TD
 | Consulta | Endpoint | Permiso | Qué devuelve |
 |---|---|---|---|
 | Stock disponible | `GET /stock-disponible/` | `inventario:stock:leer` | `cantidad`, `reservado`, `disponible` por producto/almacén |
-| Kardex | `GET /kardex/` | `inventario:kardex:leer` | Bitácora de movimientos (inmutable); filtros `?producto_id= ?almacen_id=` |
+| Kardex | `GET /kardex/` | `inventario:kardex:leer` | Bitácora de movimientos (inmutable); además de los ids acepta `?sku= ?almacen= ?tipo= ?desde= ?hasta=` |
 | Valuación | `GET /valuacion/` | `inventario:valuacion:leer` | `cantidad × costo_referencia` = valor por producto/almacén |
+
+Las tres aceptan `?producto_id=` y `?almacen_id=`. Son vistas SQL que exponen el
+`sku` y el **nombre** del almacén, no sus ids, así que la API traduce el id a esa
+clave natural (única por tenant) antes de filtrar: el frontend nunca necesita
+conocer el sku. Un id inexistente o de otro tenant devuelve una página vacía, no
+un 404, para no revelar si el registro existe en otro tenant.
 
 ---
 

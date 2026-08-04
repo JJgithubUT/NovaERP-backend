@@ -135,6 +135,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { mensaje: { type: string } } }
+        "400": { $ref: "#/components/responses/AuthBadRequest" }
 
   /api/auth/restablecer/:
     post:
@@ -157,6 +158,7 @@ paths:
           content:
             application/json:
               schema: { type: object, properties: { mensaje: { type: string } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
   # ─────────────────────────────────────────── Núcleo
@@ -207,6 +209,7 @@ paths:
         "201":
           description: Cliente creado.
           content: { application/json: { schema: { $ref: "#/components/schemas/Cliente" } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -220,6 +223,8 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/ClienteInput" } } }
       responses:
         "200": { description: Cliente actualizado., content: { application/json: { schema: { $ref: "#/components/schemas/Cliente" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -228,6 +233,7 @@ paths:
       summary: Baja lógica del cliente
       responses:
         "200": { description: Cliente dado de baja., content: { application/json: { schema: { type: object, properties: { id: { type: string }, activo: { type: boolean } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -244,6 +250,8 @@ paths:
         - { name: etapa, in: query, schema: { $ref: "#/components/schemas/EtapaOportunidad" } }
         - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
         - { name: responsable_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por fecha_cierre_estimada. }
+        - { name: hasta, in: query, schema: { type: string, format: date }, description: Acota por fecha_cierre_estimada. }
       responses:
         "200":
           description: Página de oportunidades.
@@ -274,6 +282,8 @@ paths:
                 fecha_cierre_estimada: { type: string, format: date, description: No anterior a hoy }
       responses:
         "201": { description: Oportunidad creada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -310,6 +320,8 @@ paths:
       summary: Detalle de oportunidad
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Ventas — Oportunidades]
@@ -325,6 +337,8 @@ paths:
                 fecha_cierre_estimada: { type: string, format: date }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -345,6 +359,8 @@ paths:
                 etapa: { $ref: "#/components/schemas/EtapaOportunidad" }
       responses:
         "200": { description: Etapa actualizada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
@@ -373,6 +389,8 @@ paths:
                   enum: [Precio, Competencia, Tiempo, Presupuesto, "Sin respuesta", Otro]
       responses:
         "200": { description: Oportunidad cerrada., content: { application/json: { schema: { $ref: "#/components/schemas/Oportunidad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -387,7 +405,9 @@ paths:
         - { $ref: "#/components/parameters/pageSize" }
         - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoCotizacion" } }
-        - { name: vencida, in: query, schema: { type: boolean } }
+        - { name: vencida, in: query, schema: { type: boolean }, description: "true acota a las vencidas que aún no están aprobadas ni rechazadas." }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
       responses:
         "200":
           description: Página de cotizaciones.
@@ -421,6 +441,8 @@ paths:
                   items: { $ref: "#/components/schemas/CotizacionLineaInput" }
       responses:
         "201": { description: Cotización creada (borrador o pendiente_aprobacion)., content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: Ajuste de precio manual sin permiso ventas:cotizaciones:ajustar_precio.
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
@@ -433,6 +455,8 @@ paths:
       summary: Detalle de cotización
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Ventas — Cotizaciones]
@@ -448,6 +472,8 @@ paths:
                 lineas: { type: array, items: { $ref: "#/components/schemas/CotizacionLineaInput" } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -468,6 +494,9 @@ paths:
                 decision: { type: string, enum: [aprobar, rechazar] }
       responses:
         "200": { description: Cotización resuelta., content: { application/json: { schema: { $ref: "#/components/schemas/Cotizacion" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -481,6 +510,8 @@ paths:
         - { $ref: "#/components/parameters/pageSize" }
         - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoPedido" } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
       responses:
         "200":
           description: Página de pedidos.
@@ -518,6 +549,8 @@ paths:
                       precio_unitario: { type: string, description: Opcional; default del catálogo }
       responses:
         "201": { description: Pedido creado (borrador)., content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -528,6 +561,8 @@ paths:
       summary: Detalle de pedido
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Ventas — Pedidos]
@@ -548,6 +583,9 @@ paths:
                       precio_unitario: { type: string }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -574,6 +612,8 @@ paths:
         "200":
           description: Pedido confirmado o pendiente_surtido (backorder).
           content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403":
           description: autorizar_credito=true sin el permiso finanzas:credito:autorizar.
           content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
@@ -591,6 +631,8 @@ paths:
       summary: Cancelar pedido (libera stock reservado)
       responses:
         "200": { description: Pedido cancelado., content: { application/json: { schema: { $ref: "#/components/schemas/Pedido" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
           description: El pedido tiene facturas emitidas (usar nota de crédito) o ya está cancelado.
@@ -607,6 +649,8 @@ paths:
         - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoFactura" } }
         - { name: pedido_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por fecha_emision. }
+        - { name: hasta, in: query, schema: { type: string, format: date }, description: Acota por fecha_emision. }
       responses:
         "200":
           description: Página de facturas.
@@ -643,6 +687,9 @@ paths:
                       cantidad: { type: string }
       responses:
         "201": { description: Factura emitida (con CxC creada)., content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { description: Pedido no encontrado. }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -653,6 +700,8 @@ paths:
       summary: Detalle de factura
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /api/ventas/facturas/{id}/nota-credito/:
@@ -673,6 +722,9 @@ paths:
                 reingresar_stock: { type: boolean, description: Solo aplica en NC total }
       responses:
         "200": { description: Nota de crédito emitida (factura → con_nota_credito)., content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -750,6 +802,8 @@ paths:
                   - $ref: "#/components/schemas/SobreReporte"
                   - type: object
                     properties:
+                      orden: { type: string, enum: [monto, volumen], description: Eco del criterio aplicado. }
+                      limit: { type: integer, description: Tamaño del top aplicado. }
                       resultados:
                         type: array
                         items:
@@ -766,6 +820,7 @@ paths:
             text/csv: {}
             application/pdf: {}
         "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -795,6 +850,8 @@ paths:
                   - $ref: "#/components/schemas/SobreReporte"
                   - type: object
                     properties:
+                      orden: { type: string, enum: [monto, cantidad], description: Eco del criterio aplicado. }
+                      limit: { type: integer, description: Tamaño del top aplicado. }
                       resultados:
                         type: array
                         items:
@@ -810,6 +867,7 @@ paths:
             text/csv: {}
             application/pdf: {}
         "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -855,6 +913,7 @@ paths:
             text/csv: {}
             application/pdf: {}
         "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -917,6 +976,7 @@ paths:
             text/csv: {}
             application/pdf: {}
         "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   /api/ventas/reportes/vendedores/:
@@ -963,6 +1023,7 @@ paths:
             text/csv: {}
             application/pdf: {}
         "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -988,6 +1049,7 @@ paths:
                 password: { type: string, format: password, description: Requerido en el alta; omitir en reconfirmación de correo }
       responses:
         "200": { description: Cuenta activada / correo reconfirmado., content: { application/json: { schema: { $ref: "#/components/schemas/Usuario" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
   /api/core/usuarios/:
@@ -1001,7 +1063,9 @@ paths:
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoUsuario" } }
         - { name: rol, in: query, schema: { type: string, format: uuid } }
         - { name: departamento, in: query, schema: { type: string } }
-        - { name: orden, in: query, schema: { type: string, enum: [nombre, created_at, ultimo_acceso] } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por fecha de alta (created_at). }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
+        - { name: orden, in: query, schema: { type: string, enum: [nombre, created_at, ultimo_acceso], default: nombre } }
         - { name: desc, in: query, schema: { type: boolean } }
       responses:
         "200":
@@ -1042,6 +1106,8 @@ paths:
                   - { $ref: "#/components/schemas/Usuario" }
                   - type: object
                     properties: { activacion_token: { type: string, description: En claro solo en esta respuesta } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -1067,6 +1133,8 @@ paths:
                 departamento: { type: string }
       responses:
         "200": { description: Usuario actualizado (con verificacion_token si cambió el correo)., content: { application/json: { schema: { $ref: "#/components/schemas/Usuario" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -1078,6 +1146,7 @@ paths:
       summary: Suspender usuario (cierra sus sesiones, bloquea login)
       responses:
         "200": { description: Usuario suspendido., content: { application/json: { schema: { $ref: "#/components/schemas/Usuario" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -1088,6 +1157,7 @@ paths:
       summary: Reactivar usuario suspendido
       responses:
         "200": { description: Usuario reactivado., content: { application/json: { schema: { $ref: "#/components/schemas/Usuario" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -1098,6 +1168,7 @@ paths:
       summary: Resetear el segundo factor del usuario (re-enrola en su próximo login)
       responses:
         "200": { description: MFA reseteado., content: { application/json: { schema: { $ref: "#/components/schemas/Usuario" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/core/usuarios/{id}/cerrar-sesiones/:
@@ -1107,6 +1178,7 @@ paths:
       summary: Cerrar todas las sesiones del usuario (admin)
       responses:
         "200": { description: Sesiones cerradas., content: { application/json: { schema: { type: object, properties: { revocadas: { type: integer } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/core/usuarios/{id}/roles/:
@@ -1123,7 +1195,9 @@ paths:
               required: [roles]
               properties: { roles: { type: array, items: { type: string, format: uuid } } }
       responses:
-        "200": { description: Roles del usuario actualizados. }
+        "200": { description: Roles del usuario actualizados., content: { application/json: { schema: { $ref: "#/components/schemas/RolesDeUsuario" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -1135,7 +1209,8 @@ paths:
       tags: [Núcleo — Usuarios]
       summary: Revocar un rol de un usuario
       responses:
-        "200": { description: Rol revocado. }
+        "200": { description: Rol revocado., content: { application/json: { schema: { $ref: "#/components/schemas/RolesDeUsuario" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
@@ -1148,7 +1223,8 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/page" }
         - { $ref: "#/components/parameters/pageSize" }
-        - { name: search, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string }, description: Busca en el nombre del rol. }
+        - { name: activo, in: query, schema: { type: boolean }, description: "false lista los roles dados de baja (RF-13)." }
       responses:
         "200":
           description: Página de roles.
@@ -1159,6 +1235,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Rol" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Núcleo — Roles y permisos]
@@ -1175,6 +1252,8 @@ paths:
                 permisos: { type: array, items: { type: string, description: "código dominio:recurso:accion" } }
       responses:
         "201": { description: Rol creado., content: { application/json: { schema: { $ref: "#/components/schemas/Rol" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/core/roles/{id}/:
@@ -1192,25 +1271,57 @@ paths:
                 permisos: { type: array, items: { type: string } }
       responses:
         "200": { description: Rol actualizado., content: { application/json: { schema: { $ref: "#/components/schemas/Rol" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
     delete:
       tags: [Núcleo — Roles y permisos]
       summary: Desactivar rol (baja lógica)
+      description: >
+        RF-13/CA01: si el rol tiene usuarios asignados, la baja se bloquea y hay
+        que confirmarla explícitamente con `?desactivar=true`. Un rol de sistema
+        no puede desactivarse nunca (403).
+      parameters:
+        - name: desactivar
+          in: query
+          schema: { type: boolean }
+          description: Confirmación obligatoria cuando el rol tiene usuarios asignados.
       responses:
         "200": { description: Rol desactivado. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "422": { $ref: "#/components/responses/BusinessError" }
+        "422":
+          description: >
+            Rol con usuarios asignados y sin confirmar. El cuerpo trae
+            `usuarios_asignados` y `confirmar_con: "?desactivar=true"`.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /api/core/permisos/:
     get:
       tags: [Núcleo — Roles y permisos]
       summary: Catálogo maestro de permisos (para el selector de roles)
+      description: >
+        RF-11/CA02: los permisos de un módulo desactivado en el tenant no se
+        ocultan, se devuelven con `inerte: true`, para que el admin entienda por
+        qué no puede elegirlos. Los del dominio `core` nunca son inertes.
       responses:
         "200":
           description: Permisos agrupados por dominio, con marca de "inerte" (módulo inactivo).
-          content: { application/json: { schema: { type: object } } }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dominios:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        dominio: { type: string }
+                        permisos: { type: array, items: { $ref: "#/components/schemas/Permiso" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   # ═════════════════════════════════════════ Núcleo — Sesiones
@@ -1246,6 +1357,7 @@ paths:
       summary: Políticas de seguridad del tenant
       responses:
         "200": { description: Configuración vigente + límites de plataforma., content: { application/json: { schema: { $ref: "#/components/schemas/ConfigSeguridad" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     patch:
       tags: [Núcleo — Seguridad y auditoría]
@@ -1254,6 +1366,22 @@ paths:
         content: { application/json: { schema: { $ref: "#/components/schemas/ConfigSeguridadInput" } } }
       responses:
         "200": { description: Configuración actualizada., content: { application/json: { schema: { $ref: "#/components/schemas/ConfigSeguridad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+    put:
+      tags: [Núcleo — Seguridad y auditoría]
+      summary: Endurecer políticas (alias de PATCH)
+      description: >
+        Mismo comportamiento que PATCH: los campos ausentes se conservan, no se
+        reemplaza la configuración completa.
+      requestBody:
+        content: { application/json: { schema: { $ref: "#/components/schemas/ConfigSeguridadInput" } } }
+      responses:
+        "200": { description: Configuración actualizada., content: { application/json: { schema: { $ref: "#/components/schemas/ConfigSeguridad" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/core/bitacora/:
@@ -1278,26 +1406,51 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/EventoAuditoria" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/core/bitacora/export/:
     get:
       tags: [Núcleo — Seguridad y auditoría]
       summary: Exportar la bitácora a archivo
-      parameters: [ { name: formato, in: query, schema: { type: string, enum: [csv, pdf], default: csv } } ]
+      description: >
+        Acepta los mismos filtros que la consulta y exporta el resultado completo
+        (sin paginar). Exige core:bitacora:exportar y se audita como EXPORT.
+      parameters:
+        - { name: formato, in: query, schema: { type: string, enum: [csv, pdf], default: csv } }
+        - { name: usuario_id, in: query, schema: { type: string, format: uuid } }
+        - { name: operacion, in: query, schema: { type: string } }
+        - { name: entidad, in: query, schema: { type: string } }
+        - { name: desde, in: query, schema: { type: string, format: date } }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
         "200": { description: Archivo CSV o PDF., content: { text/csv: {}, application/pdf: {} } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/core/reportes/actividad/:
     get:
       tags: [Núcleo — Seguridad y auditoría]
       summary: Reporte de actividad de usuarios (JSON, o CSV/PDF con ?formato=)
       parameters:
-        - { name: formato, in: query, schema: { type: string, enum: [csv, pdf] } }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: formato, in: query, schema: { type: string, enum: [csv, pdf] }, description: Sin este parámetro devuelve el sobre paginado; con él, el archivo completo. }
         - { name: desde, in: query, schema: { type: string, format: date } }
         - { name: hasta, in: query, schema: { type: string, format: date } }
         - { name: departamento, in: query, schema: { type: string } }
+        - { name: puesto, in: query, schema: { type: string } }
       responses:
-        "200": { description: Reporte (JSON paginado, o archivo). }
+        "200":
+          description: Página del reporte (JSON), o archivo si se pidió ?formato=.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/ActividadUsuario" } } }
+            text/csv: {}
+            application/pdf: {}
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
   # ═════════════════════════════════════════ Plataforma — Tenants (SysAdmin)
@@ -1313,6 +1466,7 @@ paths:
             schema: { type: object, required: [correo, password], properties: { correo: { type: string, format: email }, password: { type: string, format: password } } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { type: object, properties: { token: { type: string }, mensaje: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/AuthBadRequest" }
         "401": { $ref: "#/components/responses/AuthUnauthorized" }
   /api/admin/logout/:
     post:
@@ -1333,16 +1487,30 @@ paths:
             schema: { type: object, required: [token, password], properties: { token: { type: string }, password: { type: string, format: password } } }
       responses:
         "200": { description: Tenant y admin inicial activados (cascada)., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/admin/tenants/:
     get:
       tags: [Plataforma — Tenants (SysAdmin)]
       summary: Listar tenants
+      description: >
+        RF-02/CA01: este listado pagina a un máximo de **50** por página (no 100
+        como el resto de la API), y ese también es el valor por defecto.
       parameters:
         - { $ref: "#/components/parameters/page" }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 50 }
+          description: Tope propio de este endpoint (50, no 100).
         - { name: search, in: query, schema: { type: string }, description: razón social / dominio / id }
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoTenant" } }
-        - { name: plan, in: query, schema: { type: string } }
+        - { name: plan, in: query, schema: { type: string }, description: Código del plan (STARTER / BUSINESS / ENTERPRISE). }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por fecha de registro (created_at). }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
+        - name: orden
+          in: query
+          schema: { type: string, enum: [razon_social, created_at, estado, plan], default: razon_social }
+        - { name: desc, in: query, schema: { type: boolean }, description: Invierte el orden. }
       responses:
         "200":
           description: Página de tenants.
@@ -1373,6 +1541,8 @@ paths:
                 plan: { type: string, enum: [STARTER, BUSINESS, ENTERPRISE] }
       responses:
         "201": { description: Tenant creado (con admin_inicial y activacion_token)., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/admin/tenants/{id}/:
     parameters: [ { $ref: "#/components/parameters/idPath" } ]
@@ -1381,6 +1551,7 @@ paths:
       summary: Detalle de tenant (módulos activos, licencias)
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Plataforma — Tenants (SysAdmin)]
@@ -1401,9 +1572,17 @@ paths:
                     desactivar: { type: array, items: { type: string } }
                 confirmar_cascada: { type: boolean, description: Requerido para desactivar un módulo del que dependen otros }
       responses:
-        "200": { description: Tenant actualizado., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "200": { description: Tenant actualizado (detalle, con módulos activos)., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "422": { $ref: "#/components/responses/BusinessError" }
+        "422":
+          description: >
+            Módulo fuera del plan, dependencia inactiva, o desactivación con
+            dependientes sin confirmar: en ese caso el cuerpo trae
+            `requiere_confirmar_cascada: true` y `modulos_afectados` con la lista
+            de módulos que se apagarían. Reenviar con `confirmar_cascada: true`.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
   /api/admin/tenants/{id}/suspender/:
     parameters:
       - { $ref: "#/components/parameters/idPath" }
@@ -1418,6 +1597,8 @@ paths:
             schema: { type: object, required: [tipo, motivo], properties: { tipo: { type: string, enum: [cumplimiento, administrativa] }, motivo: { type: string } } }
       responses:
         "200": { description: Tenant suspendido / dado de baja., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/admin/tenants/{id}/reactivar/:
@@ -1427,6 +1608,7 @@ paths:
       summary: Reactivar un tenant suspendido o dado de baja
       responses:
         "200": { description: Tenant reactivado., content: { application/json: { schema: { $ref: "#/components/schemas/Tenant" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -1450,6 +1632,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Proveedor" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Compras]
@@ -1468,6 +1651,8 @@ paths:
                 telefono: { type: string }
       responses:
         "201": { description: Proveedor creado., content: { application/json: { schema: { $ref: "#/components/schemas/Proveedor" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/proveedores/{id}/:
@@ -1478,22 +1663,46 @@ paths:
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Proveedor" } } } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Proveedor" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
     delete:
       tags: [Compras]
       summary: Dar de baja un proveedor
+      description: >
+        Baja lógica incondicional (a diferencia del cliente, que se bloquea si
+        tiene saldo en CxC): las órdenes y CxP existentes del proveedor se
+        conservan intactas.
       responses:
-        "200": { description: OK }
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string }, activo: { type: boolean } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/proveedores/{id}/historial/:
     parameters: [ { $ref: "#/components/parameters/idPath" } ]
     get:
       tags: [Compras]
       summary: Historial de compras del proveedor
+      description: >
+        RF-51: órdenes, recepciones y cuentas por pagar del proveedor en un solo
+        payload. No está paginado: es la ficha completa del proveedor.
       responses:
-        "200": { description: OK }
+        "200":
+          description: Historial agrupado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  proveedor_id: { type: string, format: uuid }
+                  razon_social: { type: string }
+                  ordenes: { type: array, items: { $ref: "#/components/schemas/OrdenCompra" } }
+                  recepciones: { type: array, items: { $ref: "#/components/schemas/Recepcion" } }
+                  cuentas_por_pagar: { type: array, items: { $ref: "#/components/schemas/CuentaPorPagar" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/compras/ordenes/:
     get:
@@ -1504,6 +1713,8 @@ paths:
         - { $ref: "#/components/parameters/pageSize" }
         - { name: estado, in: query, schema: { $ref: "#/components/schemas/EstadoOrdenCompra" } }
         - { name: proveedor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
       responses:
         "200":
           description: Página de órdenes.
@@ -1514,6 +1725,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/OrdenCompra" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Compras]
@@ -1539,6 +1751,8 @@ paths:
                       costo_unitario: { type: string }
       responses:
         "201": { description: Orden creada., content: { application/json: { schema: { $ref: "#/components/schemas/OrdenCompra" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/ordenes/{id}/:
@@ -1548,6 +1762,8 @@ paths:
       summary: Detalle de orden
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/OrdenCompra" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
     patch:
       tags: [Compras]
@@ -1563,6 +1779,9 @@ paths:
                 estado: { type: string, enum: [enviada], description: "pendiente_aprobacion → enviada (aprobación manual)" }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/OrdenCompra" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/ordenes/{id}/cancelar/:
@@ -1572,15 +1791,32 @@ paths:
       summary: Cancelar orden de compra
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/OrdenCompra" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/recepciones/:
     get:
       tags: [Compras]
       summary: Listar recepciones
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: orden_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de recepciones. }
+        "200":
+          description: Página de recepciones.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/Recepcion" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Compras]
@@ -1602,32 +1838,69 @@ paths:
                     required: [orden_compra_linea_id, cantidad]
                     properties:
                       orden_compra_linea_id: { type: string, format: uuid }
-                      cantidad: { type: string }
+                      cantidad: { type: string, description: No puede exceder lo pendiente de la línea de la orden. }
+                      costo_unitario:
+                        type: string
+                        description: >
+                          Opcional, >= 0. Es el costo real facturado por el
+                          proveedor y con él se recalcula `costo_referencia` del
+                          producto. Si se omite se toma 0, lo que dejaría el
+                          costo del producto en cero: envíalo siempre.
       responses:
         "201": { description: Recepción registrada., content: { application/json: { schema: { $ref: "#/components/schemas/Recepcion" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/compras/cuentas-por-pagar/:
     get:
       tags: [Compras]
       summary: Listar cuentas por pagar
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: proveedor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de CxP. }
+        "200":
+          description: Página de CxP.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/CuentaPorPagar" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/compras/config-aprobacion/:
     get:
       tags: [Compras]
       summary: Umbral de aprobación de compras del tenant
       responses:
-        "200": { description: OK }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/ConfigAprobacion" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     patch:
       tags: [Compras]
       summary: Editar el umbral de aprobación
-      requestBody: { content: { application/json: { schema: { type: object, properties: { umbral_monto: { type: string } } } } } }
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ConfigAprobacionInput" } } } }
       responses:
         "200": { description: OK }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+    put:
+      tags: [Compras]
+      summary: Editar el umbral de aprobación (alias de PATCH)
+      description: Mismo comportamiento que PATCH; se acepta por comodidad del cliente.
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ConfigAprobacionInput" } } } }
+      responses:
+        "200": { description: OK }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
@@ -1651,6 +1924,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Producto" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Inventario]
@@ -1661,16 +1935,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [sku, nombre, costo_referencia, precio_venta]
+              required: [sku, nombre]
               properties:
-                sku: { type: string }
+                sku: { type: string, description: Único por tenant. }
                 nombre: { type: string }
                 descripcion: { type: string }
-                costo_referencia: { type: string }
-                precio_venta: { type: string }
-                stock_minimo: { type: string }
+                costo_referencia: { type: string, description: "Decimal >= 0. Si se omite se guarda 0." }
+                precio_venta: { type: string, description: "Decimal >= 0. Si se omite se guarda 0." }
+                stock_minimo: { type: string, description: "Decimal. Umbral que dispara las alertas; 0 si se omite." }
       responses:
         "201": { description: Producto creado., content: { application/json: { schema: { $ref: "#/components/schemas/Producto" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/inventario/productos/{id}/:
@@ -1681,19 +1957,29 @@ paths:
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Producto" } } } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Producto" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
     delete:
       tags: [Inventario]
       summary: Descontinuar producto (baja lógica)
+      description: Baja lógica; el histórico de movimientos y el kardex se conservan.
       responses:
-        "200": { description: OK }
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string }, activo: { type: boolean } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/inventario/almacenes/:
     get:
       tags: [Inventario]
       summary: Listar almacenes
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" }, { name: activo, in: query, schema: { type: boolean } } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: search, in: query, schema: { type: string }, description: Busca en el nombre. }
+        - { name: activo, in: query, schema: { type: boolean } }
       responses:
         "200":
           description: Página de almacenes.
@@ -1704,6 +1990,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Almacen" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Inventario]
@@ -1715,6 +2002,8 @@ paths:
             schema: { type: object, required: [nombre], properties: { nombre: { type: string }, ubicacion: { type: string } } }
       responses:
         "201": { description: Almacén creado., content: { application/json: { schema: { $ref: "#/components/schemas/Almacen" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/inventario/almacenes/{id}/:
@@ -1725,12 +2014,18 @@ paths:
       requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/Almacen" } } } }
       responses:
         "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Almacen" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
     delete:
       tags: [Inventario]
       summary: Dar de baja un almacén
       responses:
-        "200": { description: OK }
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string }, activo: { type: boolean } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
   /api/inventario/movimientos/:
     get:
@@ -1741,8 +2036,20 @@ paths:
         - { $ref: "#/components/parameters/pageSize" }
         - { name: producto_id, in: query, schema: { type: string, format: uuid } }
         - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tipo, in: query, schema: { $ref: "#/components/schemas/TipoMovimiento" } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por ocurrido_en. }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de movimientos. }
+        "200":
+          description: Página de movimientos.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/Movimiento" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Inventario]
@@ -1763,15 +2070,32 @@ paths:
                 costo_unitario: { type: string }
       responses:
         "201": { description: Movimiento aplicado., content: { application/json: { schema: { $ref: "#/components/schemas/Movimiento" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/inventario/ajustes/:
     get:
       tags: [Inventario]
       summary: Listar ajustes
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de ajustes. }
+        "200":
+          description: Página de ajustes.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/AjusteInventario" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Inventario]
@@ -1789,16 +2113,34 @@ paths:
                 almacen_id: { type: string, format: uuid }
                 cantidad: { type: string, description: "Positivo o negativo (≠ 0)" }
       responses:
-        "201": { description: Ajuste aplicado. }
+        "201": { description: Ajuste aplicado., content: { application/json: { schema: { $ref: "#/components/schemas/AjusteInventario" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/inventario/transferencias/:
     get:
       tags: [Inventario]
       summary: Listar transferencias
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_origen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_destino_id, in: query, schema: { type: string, format: uuid } }
+        - { name: desde, in: query, schema: { type: string, format: date }, description: Acota por created_at. }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de transferencias. }
+        "200":
+          description: Página de transferencias.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/Transferencia" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
       tags: [Inventario]
@@ -1816,14 +2158,24 @@ paths:
                 almacen_destino_id: { type: string, format: uuid }
                 cantidad: { type: string }
       responses:
-        "201": { description: Transferencia aplicada. }
+        "201": { description: Transferencia aplicada., content: { application/json: { schema: { $ref: "#/components/schemas/Transferencia" } } } }
+        "400": { $ref: "#/components/responses/JsonInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
   /api/inventario/stock-disponible/:
     get:
       tags: [Inventario]
       summary: Stock disponible (cantidad − reservado) por producto/almacén
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" }, { name: producto_id, in: query, schema: { type: string, format: uuid } } ]
+      description: >
+        Los filtros por id se traducen internamente al `sku` y al nombre del
+        almacén, que es lo que expone la vista SQL. Un id inexistente o de otro
+        tenant devuelve una página vacía, no un 404.
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
       responses:
         "200":
           description: Página de existencias.
@@ -1834,38 +2186,91 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/StockDisponible" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/kardex/:
     get:
       tags: [Inventario]
       summary: Kardex (bitácora inmutable de movimientos)
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" }, { name: producto_id, in: query, schema: { type: string, format: uuid } }, { name: almacen_id, in: query, schema: { type: string, format: uuid } } ]
+      description: >
+        `producto_id` / `almacen_id` se traducen al `sku` y al nombre del almacén
+        (las columnas reales de la vista); `sku`, `almacen` y `tipo` filtran
+        directamente sobre ellas. `desde` / `hasta` acotan por `ocurrido_en`.
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: sku, in: query, schema: { type: string } }
+        - { name: almacen, in: query, schema: { type: string }, description: Nombre exacto del almacén. }
+        - { name: tipo, in: query, schema: { $ref: "#/components/schemas/TipoMovimiento" } }
+        - { name: desde, in: query, schema: { type: string, format: date } }
+        - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
-        "200": { description: Página de kardex. }
+        "200":
+          description: Página de kardex.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/FilaKardex" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/valuacion/:
     get:
       tags: [Inventario]
       summary: Valuación del inventario (cantidad × costo)
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
       responses:
-        "200": { description: Página de valuación. }
+        "200":
+          description: Página de valuación.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/FilaValuacion" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/alertas-stock-minimo/:
     get:
       tags: [Inventario]
       summary: Alertas de stock por debajo del mínimo
-      parameters: [ { $ref: "#/components/parameters/page" }, { $ref: "#/components/parameters/pageSize" } ]
+      description: Las alertas las genera el trigger de inventario; la API no las crea.
+      parameters:
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+        - { name: producto_id, in: query, schema: { type: string, format: uuid } }
+        - { name: almacen_id, in: query, schema: { type: string, format: uuid } }
+        - { name: notificada, in: query, schema: { type: boolean } }
       responses:
-        "200": { description: Página de alertas. }
+        "200":
+          description: Página de alertas.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Pagina" }
+                  - type: object
+                    properties: { results: { type: array, items: { $ref: "#/components/schemas/AlertaStockMinimo" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/alertas-stock-minimo/{id}/notificar/:
-    parameters: [ { name: id, in: path, required: true, schema: { type: integer } } ]
+    parameters: [ { name: id, in: path, required: true, schema: { type: integer }, description: "Entero, no UUID: la alerta usa un id secuencial." } ]
     post:
       tags: [Inventario]
       summary: Marcar una alerta como notificada
       responses:
-        "200": { description: OK }
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/AlertaStockMinimo" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
@@ -1924,6 +2329,12 @@ components:
     AuthBadRequest:
       description: JSON inválido o faltan campos obligatorios.
       content: { application/json: { schema: { $ref: "#/components/schemas/ErrorAuth" } } }
+    JsonInvalido:
+      description: >
+        El cuerpo no es JSON válido. Se distingue del 422 (JSON bien formado que
+        rompe una regla de negocio) y del 400 de los reportes, que es un
+        parámetro de consulta mal formado.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "JSON invalido." } } }
     Forbidden:
       description: Autenticado pero sin el permiso requerido.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "No cuenta con permisos para esta operacion", permiso_requerido: "ventas:pedidos:crear" } } }
@@ -2080,6 +2491,7 @@ components:
         folio: { type: string }
         cliente_id: { type: string, format: uuid }
         oportunidad_id: { type: string, format: uuid, nullable: true }
+        vendedor_id: { type: string, format: uuid, nullable: true, description: Atribución comercial; alimenta RV-06. }
         estado: { $ref: "#/components/schemas/EstadoCotizacion" }
         vencida: { type: boolean, description: Derivada de vigente_hasta }
         subtotal: { type: string }
@@ -2115,6 +2527,7 @@ components:
         cliente_id: { type: string, format: uuid }
         cotizacion_id: { type: string, format: uuid, nullable: true }
         almacen_id: { type: string, format: uuid, nullable: true }
+        vendedor_id: { type: string, format: uuid, nullable: true, description: Atribución comercial; alimenta RV-06. }
         estado: { $ref: "#/components/schemas/EstadoPedido" }
         total: { type: string }
         lineas:
@@ -2139,6 +2552,7 @@ components:
         folio: { type: string }
         pedido_id: { type: string, format: uuid }
         cliente_id: { type: string, format: uuid }
+        vendedor_id: { type: string, format: uuid, nullable: true, description: Atribución comercial; alimenta RV-06. }
         estado: { $ref: "#/components/schemas/EstadoFactura" }
         subtotal: { type: string }
         impuestos: { type: string }
@@ -2167,7 +2581,7 @@ components:
         puesto: { type: string, nullable: true }
         departamento: { type: string, nullable: true }
         estado: { $ref: "#/components/schemas/EstadoUsuario" }
-        mfa_enrolado: { type: boolean }
+        mfa_enrolado: { type: boolean, description: "No viene en las filas del directorio (GET /api/core/usuarios/)" }
         roles: { type: array, items: { type: string } }
         ultimo_acceso: { type: string, format: date-time, nullable: true, description: "Solo en el directorio" }
         created_at: { type: string, format: date-time }
@@ -2209,8 +2623,15 @@ components:
         intentos_max_ventana: { type: integer }
         ventana_minutos: { type: integer }
         bloqueo_minutos: { type: integer }
-        updated_at: { type: string, format: date-time }
-        limites_plataforma: { type: object, description: "min/max permitidos por campo" }
+        updated_at: { type: [string, "null"], format: date-time, description: "null si el tenant todavía no ha guardado su política (se devuelven los valores por defecto)." }
+        limites_plataforma:
+          type: object
+          description: "Rango permitido por la plataforma en cada campo; el formulario debe validar contra esto."
+          additionalProperties:
+            type: object
+            properties:
+              min: { type: integer }
+              max: { type: integer }
     ConfigSeguridadInput:
       type: object
       properties:
@@ -2220,6 +2641,43 @@ components:
         intentos_max_ventana: { type: integer }
         ventana_minutos: { type: integer }
         bloqueo_minutos: { type: integer }
+    RolesDeUsuario:
+      type: object
+      description: Conjunto de roles vigentes de un usuario tras asignar o revocar.
+      properties:
+        usuario_id: { type: string, format: uuid }
+        roles:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              nombre: { type: string }
+              activo: { type: boolean }
+              es_sistema: { type: boolean }
+    Permiso:
+      type: object
+      description: Entrada del catálogo maestro. El código es "dominio:recurso:accion".
+      properties:
+        codigo: { type: string, example: "inventario:productos:crear" }
+        dominio: { type: string }
+        recurso: { type: string }
+        accion: { type: string }
+        descripcion: { type: string, nullable: true }
+        inerte: { type: boolean, description: "true = su módulo está desactivado en el tenant: no se puede elegir y no autoriza nada." }
+    ActividadUsuario:
+      type: object
+      description: Fila del reporte de actividad (RF-23).
+      properties:
+        usuario_id: { type: string, format: uuid }
+        nombre_completo: { type: string }
+        correo: { type: string }
+        departamento: { type: string, nullable: true }
+        puesto: { type: string, nullable: true }
+        estado: { $ref: "#/components/schemas/EstadoUsuario" }
+        ultimo_acceso: { type: string, format: date-time, nullable: true }
+        num_sesiones: { type: integer }
+        num_acciones_cud: { type: integer, description: Acciones INSERT/UPDATE/DELETE auditadas en el rango. }
     EventoAuditoria:
       type: object
       properties:
@@ -2231,6 +2689,14 @@ components:
         criticidad: { type: string, enum: [BAJA, NORMAL, ALTA] }
         ip_origen: { type: string, nullable: true }
         ocurrido_en: { type: string, format: date-time }
+        valores_antes:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Fila anterior al cambio, tal como la guardó el trigger fn_auditar. Null en INSERT y en eventos de sesión.
+        valores_despues:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Fila resultante. Null en DELETE y en eventos de sesión.
 
     # ── Plataforma ──
     Tenant:
@@ -2243,8 +2709,31 @@ components:
         plan: { type: object, properties: { codigo: { type: string }, nombre: { type: string }, licencias_max: { type: integer } } }
         estado: { $ref: "#/components/schemas/EstadoTenant" }
         motivo_suspension: { type: string, nullable: true }
-        modulos_activos: { type: array, items: { type: object }, description: "Solo en el detalle" }
-        usuarios: { type: object, description: "registrados / licencias — solo en el detalle" }
+        modulos_activos:
+          description: "Solo en el detalle (RF-02/CA05)."
+          type: array
+          items:
+            type: object
+            properties:
+              codigo: { type: string }
+              nombre: { type: string }
+              fase: { type: integer }
+        usuarios:
+          description: "Solo en el detalle. Las licencias las consumen los usuarios pendientes, pendiente_verificacion y activos; un suspendido no consume."
+          type: object
+          properties:
+            registrados: { type: integer }
+            licencias_consumidas: { type: integer }
+            licencias_max: { type: integer }
+        admin_inicial:
+          description: "Solo al registrar el tenant y al activarlo; `nombre_completo` únicamente en el registro."
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            correo: { type: string }
+            nombre_completo: { type: string }
+            estado: { $ref: "#/components/schemas/EstadoUsuario" }
+        activacion_token: { type: string, description: "Solo al registrar: en claro una única vez." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -2278,6 +2767,25 @@ components:
               costo_unitario: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ConfigAprobacion:
+      type: object
+      properties:
+        tenant_id: { type: string, format: uuid }
+        umbral_monto: { type: string }
+    ConfigAprobacionInput:
+      type: object
+      properties:
+        umbral_monto: { type: string, description: "Decimal >= 0. Una orden que lo supera nace en pendiente_aprobacion." }
+    CuentaPorPagar:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        proveedor_id: { type: string, format: uuid }
+        origen_tipo: { type: string, description: "Documento que la originó (p. ej. recepcion_mercancia)." }
+        origen_id: { type: string }
+        monto_original: { type: string }
+        saldo: { type: string }
+        created_at: { type: string, format: date-time }
     Recepcion:
       type: object
       properties:
@@ -2327,8 +2835,40 @@ components:
         referencia_tipo: { type: string, nullable: true }
         referencia_id: { type: string, nullable: true }
         ocurrido_en: { type: string, format: date-time }
+    AjusteInventario:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        producto_id: { type: string, format: uuid }
+        almacen_id: { type: string, format: uuid }
+        motivo: { type: string, enum: [conteo_fisico, merma, otro] }
+        cantidad: { type: string, description: "Positivo suma, negativo resta (≠ 0)." }
+        aprobado_por: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+    Transferencia:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        producto_id: { type: string, format: uuid }
+        almacen_origen_id: { type: string, format: uuid }
+        almacen_destino_id: { type: string, format: uuid }
+        cantidad: { type: string }
+        created_at: { type: string, format: date-time }
+    AlertaStockMinimo:
+      type: object
+      properties:
+        id: { type: integer, description: "Secuencial, no UUID." }
+        producto_id: { type: string, format: uuid }
+        almacen_id: { type: string, format: uuid }
+        cantidad_al_disparo: { type: string, description: Existencia en el momento en que se disparó, no la actual. }
+        disparada_en: { type: string, format: date-time }
+        notificada: { type: boolean }
     StockDisponible:
       type: object
+      description: >
+        Fila de la vista v_stock_disponible. Identifica el producto por `sku` y el
+        almacén por su nombre: la vista no expone sus UUIDs (ver los filtros del
+        endpoint).
       properties:
         sku: { type: string }
         producto: { type: string }
@@ -2336,6 +2876,28 @@ components:
         cantidad: { type: string }
         reservado: { type: string }
         disponible: { type: string }
+    FilaKardex:
+      type: object
+      properties:
+        movimiento_id: { type: integer, description: "Id del movimiento; la vista no tiene un `id` propio." }
+        sku: { type: string }
+        producto: { type: string }
+        almacen: { type: string }
+        tipo: { $ref: "#/components/schemas/TipoMovimiento" }
+        cantidad: { type: string }
+        costo_unitario: { type: string, nullable: true }
+        referencia_tipo: { type: string, nullable: true }
+        referencia_id: { type: string, nullable: true }
+        ocurrido_en: { type: string, format: date-time }
+    FilaValuacion:
+      type: object
+      properties:
+        sku: { type: string }
+        producto: { type: string }
+        almacen: { type: string }
+        cantidad: { type: string }
+        costo_referencia: { type: string }
+        valor_total: { type: string, description: cantidad × costo_referencia }
 
     # ── Enumeraciones ──
     EstadoTenant: { type: string, enum: [pendiente, activo, suspendido, baja_logica] }

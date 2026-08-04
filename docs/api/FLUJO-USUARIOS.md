@@ -148,6 +148,10 @@ sequenceDiagram
 
 ## 6. Roles y permisos (para las pantallas de administración)
 
+> El modelo RBAC completo (resolución por petición, bypass del `TENANT_ADMIN`,
+> permisos inertes, segregación de funciones y el catálogo de los 74 permisos) está
+> en **[PERMISOS.md](./PERMISOS.md)**. Aquí van sólo los endpoints.
+
 Si el FE incluye administración de roles (RBAC), estos son los endpoints:
 
 | Acción | Endpoint | Permiso |

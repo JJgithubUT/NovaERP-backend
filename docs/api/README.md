@@ -26,6 +26,13 @@ Empieza por aquí y sigue el orden sugerido.
 Explican el **funcionamiento** (ciclo de vida, máquinas de estado, qué permiso gatea
 cada acción), con diagramas:
 
+- **[FLUJO-TENANTS.md](./FLUJO-TENANTS.md)** — ciclo de vida completo de una
+  organización: alta y onboarding, cómo cada petición queda atada a su tenant, plan y
+  módulos (con dependencias en cascada), licencias, política de seguridad, suspensión
+  y auditoría. Transversal a las dos superficies.
+- **[PERMISOS.md](./PERMISOS.md)** — el modelo RBAC explicado: cómo se resuelve un
+  permiso en cada petición, el bypass del `TENANT_ADMIN`, los permisos inertes por
+  módulo, `401` vs `403`, administración de roles y el **catálogo completo (74)**.
 - **[FLUJO-USUARIOS.md](./FLUJO-USUARIOS.md)** — alta, activación, MFA, gestión por el
   admin, autoservicio, roles y sesiones. *(También hay una versión HTML navegable.)*
 - **[FLUJO-VENTAS.md](./FLUJO-VENTAS.md)** — oportunidad → cotización → pedido (reserva de
@@ -37,8 +44,10 @@ cada acción), con diagramas:
   recepción (suma stock + cuenta por pagar).
 - **[FLUJO-INVENTARIO.md](./FLUJO-INVENTARIO.md)** — movimientos, ajustes, transferencias,
   stock disponible, kardex, valuación y alertas.
-- **[FLUJO-PLATAFORMA.md](./FLUJO-PLATAFORMA.md)** — SysAdmin: alta y administración de
-  organizaciones (tenants), módulos y suspensión.
+- **[FLUJO-PLATAFORMA.md](./FLUJO-PLATAFORMA.md)** — SysAdmin: la **consola** de alta y
+  administración de organizaciones, módulos y suspensión. (El ciclo de vida completo
+  del tenant, incluida la parte que ocurre en la app de tenant, está en
+  [FLUJO-TENANTS.md](./FLUJO-TENANTS.md).)
 
 ## 🧑‍🍳 Recetas (cookbook)
 

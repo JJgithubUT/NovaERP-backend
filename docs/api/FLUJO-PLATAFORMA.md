@@ -6,6 +6,9 @@ normalmente un frontend distinto (consola interna).
 
 > Prerrequisitos: [GUIA-FRONTEND.md](./GUIA-FRONTEND.md) · Referencia: [openapi.yaml](./openapi.yaml).
 > Rutas bajo `/api/admin/` (+ la activación pública `/api/auth/activar-tenant/`).
+> El **ciclo de vida completo** de una organización — incluidas las partes que ocurren
+> en la app de tenant (activación, licencias, política de seguridad, aislamiento por
+> petición) — está en [FLUJO-TENANTS.md](./FLUJO-TENANTS.md).
 
 ---
 

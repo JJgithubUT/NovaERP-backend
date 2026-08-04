@@ -13,6 +13,7 @@ from inventario.models import Movimiento
 from ventas.models import (
     ConfigVentas, FacturaLinea, FacturaVenta, NotaCredito, PedidoLinea, PedidoVenta,
 )
+from ventas.services.atribucion import resolver_vendedor
 
 CENTAVO = Decimal("0.01")
 # Estados de pedido desde los que se puede facturar (queda pendiente por facturar).
@@ -48,6 +49,7 @@ def serialize_factura(f):
         "folio": f.folio,
         "pedido_id": str(f.pedido_id),
         "cliente_id": str(f.cliente_id),
+        "vendedor_id": str(f.vendedor_id) if f.vendedor_id else None,
         "estado": f.estado,
         "subtotal": str(f.subtotal),
         "impuestos": str(f.impuestos),
@@ -131,6 +133,8 @@ def generar_factura(pedido, data, request):
             id=uuid.uuid4(), tenant=tenant, folio=_generar_folio(tenant), pedido=pedido,
             cliente_id=pedido.cliente_id, estado="emitida", subtotal=subtotal,
             impuestos=impuestos, total=total, fecha_emision=now,
+            # RN-06: la venta es de quien la trabajo, no de quien factura.
+            vendedor_id=resolver_vendedor(data, request, tenant, heredado=pedido.vendedor_id),
         )
 
         with connection.cursor() as cursor:

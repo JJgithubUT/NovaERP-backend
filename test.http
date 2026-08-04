@@ -2024,3 +2024,98 @@ Content-Type: application/json
   "monto": "3364.00",
   "reingresar_stock": true
 }
+
+###
+
+# ============================================================================
+# RV-01..06 REPORTES DE VENTAS
+# Ver docs/api/FLUJO-VENTAS-REPORTES.md y docs/SPRINT-REPORTES-VENTAS.md.
+#
+# Los seis exigen ventas:reportes:leer. Con ?formato=csv|pdf devuelven el
+# archivo completo y exigen ademas ventas:reportes:exportar (403 si falta).
+# desde/hasta son obligatorios (400 si faltan) y el rango no puede pasar de
+# 366 dias (422). Importes en string decimal: parsear con decimal, no float.
+# ============================================================================
+
+# RV-01: facturacion agregada por mes. venta_neta = facturado - notas de credito.
+# Una NC se imputa al mes de SU fecha, no al de la factura que corrige.
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-12-31&agrupar=mes
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-01: mismo reporte por dia y acotado a un cliente.
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/?desde=2026-07-01&hasta=2026-07-31&agrupar=dia&cliente_id={{clienteVentas}}
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-02: top 10 de clientes por venta neta. Los totales agregan TODOS los
+# clientes del rango, no solo el top: cambiar limit no cambia los totales.
+GET {{host}}/api/ventas/reportes/clientes/?desde=2026-01-01&hasta=2026-12-31&orden=monto&limit=10
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-03: top de productos. OJO: importe BRUTO, las notas de credito no tienen
+# desglose por linea y no se descuentan aqui (por eso no cuadra con RV-01).
+GET {{host}}/api/ventas/reportes/productos/?desde=2026-01-01&hasta=2026-12-31&orden=cantidad&limit=20
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-04: embudo. Cada etapa cuenta documentos CREADOS en el rango; la
+# conversion es respecto de la etapa anterior, no un seguimiento por documento.
+GET {{host}}/api/ventas/reportes/embudo/?desde=2026-01-01&hasta=2026-12-31
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-05: cartera a una fecha de corte (no usa rango). El saldo se reconstruye
+# A ESA FECHA. La antiguedad son dias DESDE LA EMISION, no dias vencidos.
+GET {{host}}/api/ventas/reportes/cartera/?corte=2026-07-31
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-05 con el detalle factura a factura (paginado).
+GET {{host}}/api/ventas/reportes/cartera/?corte=2026-07-31&detalle=true&page=1&page_size=20
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# RV-06: desempeno por vendedor. La fila con vendedor_id null ("Sin asignar")
+# son documentos sin atribucion; nunca se reparten entre los vendedores.
+GET {{host}}/api/ventas/reportes/vendedores/?desde=2026-01-01&hasta=2026-12-31
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# Exportacion: exige ventas:reportes:exportar y se audita como evento EXPORT.
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-12-31&formato=csv
+Authorization: Bearer {{ventasToken}}
+
+###
+
+GET {{host}}/api/ventas/reportes/clientes/?desde=2026-01-01&hasta=2026-12-31&formato=pdf
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# Errores esperados --------------------------------------------------------
+
+# 400: faltan desde/hasta
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# 400: agrupar fuera del catalogo
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-01-31&agrupar=trimestre
+Authorization: Bearer {{ventasToken}}
+
+###
+
+# 422: rango mayor a 366 dias
+GET {{host}}/api/ventas/reportes/ventas-por-periodo/?desde=2024-01-01&hasta=2026-01-01
+Authorization: Bearer {{ventasToken}}

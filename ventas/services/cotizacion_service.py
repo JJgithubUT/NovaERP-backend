@@ -12,6 +12,7 @@ from core.utils.pagination import paginate
 from core.utils.permissions import exigir_permiso, tiene_permiso
 from inventario.models import Producto
 from ventas.models import Cliente, Cotizacion, CotizacionLinea, ConfigVentas, Oportunidad
+from ventas.services.atribucion import resolver_vendedor
 
 CENTAVO = Decimal("0.01")
 ESTADOS_EDITABLES = {"borrador", "pendiente_aprobacion"}
@@ -127,6 +128,7 @@ def serialize_cotizacion(cot):
         "descuento_pct": str(cot.descuento_pct),
         "total": str(cot.total),
         "vigente_hasta": cot.vigente_hasta.isoformat() if cot.vigente_hasta else None,
+        "vendedor_id": str(cot.vendedor_id) if cot.vendedor_id else None,
         "lineas": [{
             "id": str(l.id), "producto_id": str(l.producto_id), "descripcion": l.descripcion,
             "cantidad": str(l.cantidad), "precio_unitario": str(l.precio_unitario),
@@ -175,6 +177,12 @@ def crear_cotizacion(data, request):
             id=uuid.uuid4(), tenant=tenant, folio=_generar_folio(tenant), cliente=cliente,
             oportunidad=oportunidad, estado=estado, subtotal=subtotal, descuento_pct=descuento_pct,
             total=total, vigente_hasta=_parse_date(data.get("vigente_hasta")),
+            # RN-06: por defecto el actor; hereda el responsable de la oportunidad
+            # cuando la cotizacion nace de una.
+            vendedor_id=resolver_vendedor(
+                data, request, tenant,
+                heredado=oportunidad.responsable_id if oportunidad else None,
+            ),
             created_at=now, updated_at=now,
         )
         _insertar_lineas(cot.id, lineas)

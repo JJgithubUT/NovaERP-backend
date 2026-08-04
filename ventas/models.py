@@ -32,6 +32,7 @@ class Cotizacion(models.Model):
     descuento_pct = models.DecimalField(db_column='descuento_pct', max_digits=5, decimal_places=2)
     total = models.DecimalField(db_column='total', max_digits=14, decimal_places=2)
     vigente_hasta = models.DateField(db_column='vigente_hasta', blank=True, null=True)
+    vendedor = models.ForeignKey('core.Usuario', on_delete=models.DO_NOTHING, db_column='vendedor_id', related_name='ventas_cotizacion_vendedor_set', blank=True, null=True)  # RV-01..06
     created_at = models.DateTimeField(db_column='created_at')
     updated_at = models.DateTimeField(db_column='updated_at')
 
@@ -78,6 +79,7 @@ class FacturaVenta(models.Model):
     impuestos = models.DecimalField(db_column='impuestos', max_digits=14, decimal_places=2)
     total = models.DecimalField(db_column='total', max_digits=14, decimal_places=2)
     fecha_emision = models.DateTimeField(db_column='fecha_emision')
+    vendedor = models.ForeignKey('core.Usuario', on_delete=models.DO_NOTHING, db_column='vendedor_id', related_name='ventas_factura_venta_vendedor_set', blank=True, null=True)  # RV-01..06
 
     class Meta:
         managed = False
@@ -150,6 +152,7 @@ class PedidoVenta(models.Model):
     estado = models.CharField(db_column='estado', max_length=17, choices=[('borrador', 'borrador'), ('confirmado', 'confirmado'), ('pendiente_surtido', 'pendiente_surtido'), ('cancelado', 'cancelado'), ('facturado_parcial', 'facturado_parcial'), ('facturado_total', 'facturado_total')])  # ENUM Postgres 'pedido_estado'
     total = models.DecimalField(db_column='total', max_digits=14, decimal_places=2)
     almacen = models.ForeignKey('inventario.Almacen', on_delete=models.DO_NOTHING, db_column='almacen_id', related_name='ventas_pedido_venta_almacen_set', blank=True, null=True)  # RF-38
+    vendedor = models.ForeignKey('core.Usuario', on_delete=models.DO_NOTHING, db_column='vendedor_id', related_name='ventas_pedido_venta_vendedor_set', blank=True, null=True)  # RV-01..06
     created_at = models.DateTimeField(db_column='created_at')
     updated_at = models.DateTimeField(db_column='updated_at')
 

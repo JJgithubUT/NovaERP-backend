@@ -14,7 +14,7 @@ Empieza por aquí y sigue el orden sugerido.
    login de dos fases + MFA, uso del token, errores, paginación, enumeraciones. Es la
    referencia rápida del día a día.
 3. **[openapi.yaml](./openapi.yaml)** — La **referencia técnica** de todos los endpoints
-   (98 operaciones). Ábrela en Swagger UI / Redoc, impórtala a Postman, o genera un
+   (104 operaciones). Ábrela en Swagger UI / Redoc, impórtala a Postman, o genera un
    cliente tipado (TypeScript / Kotlin / Swift).
 4. **[../../test.http](../../test.http)** — Ejemplos **ejecutables** de cada endpoint
    (extensión REST Client de VS Code).
@@ -30,6 +30,9 @@ cada acción), con diagramas:
   admin, autoservicio, roles y sesiones. *(También hay una versión HTML navegable.)*
 - **[FLUJO-VENTAS.md](./FLUJO-VENTAS.md)** — oportunidad → cotización → pedido (reserva de
   stock y crédito) → factura → nota de crédito.
+- **[FLUJO-VENTAS-REPORTES.md](./FLUJO-VENTAS-REPORTES.md)** — los seis reportes
+  comerciales (ventas por periodo, rankings, embudo, cartera, vendedores): qué mide
+  cada cifra, qué **no** mide, exportación y permisos.
 - **[FLUJO-COMPRAS.md](./FLUJO-COMPRAS.md)** — proveedor → orden (umbral de aprobación) →
   recepción (suma stock + cuenta por pagar).
 - **[FLUJO-INVENTARIO.md](./FLUJO-INVENTARIO.md)** — movimientos, ajustes, transferencias,
@@ -53,7 +56,8 @@ cada acción), con diagramas:
 | **Portal de plataforma (SysAdmin)** | `/api/admin/` | GUIA-APP §5.3 · openapi.yaml |
 
 **Módulos con endpoints:** Núcleo (usuarios, roles, sesiones, seguridad, auditoría,
-reportes), Plataforma (tenants), Ventas, Compras, Inventario.
+reportes), Plataforma (tenants), Ventas (incluida su **reportería**: RV-01…06),
+Compras, Inventario.
 
 ---
 

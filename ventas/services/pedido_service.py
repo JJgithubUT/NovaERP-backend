@@ -13,6 +13,7 @@ from inventario.models import Almacen, Producto
 from ventas.models import (
     Cliente, ConfigVentas, Cotizacion, CotizacionLinea, PedidoLinea, PedidoVenta,
 )
+from ventas.services.atribucion import resolver_vendedor
 
 PERMISO_AUTORIZAR_CREDITO = "finanzas:credito:autorizar"
 
@@ -53,6 +54,7 @@ def serialize_pedido(p):
         "cliente_id": str(p.cliente_id),
         "cotizacion_id": str(p.cotizacion_id) if p.cotizacion_id else None,
         "almacen_id": str(p.almacen_id) if p.almacen_id else None,
+        "vendedor_id": str(p.vendedor_id) if p.vendedor_id else None,
         "estado": p.estado,
         "total": str(p.total),
         "lineas": [{
@@ -133,6 +135,12 @@ def crear_pedido(data, request):
         pedido = PedidoVenta.objects.create(
             id=uuid.uuid4(), tenant=tenant, folio=_generar_folio(tenant), cliente=cliente,
             cotizacion=cotizacion, estado="borrador", total=total, almacen=None,
+            # RN-06: hereda el vendedor de la cotizacion de origen; en un pedido
+            # directo la atribucion es del actor.
+            vendedor_id=resolver_vendedor(
+                data, request, tenant,
+                heredado=cotizacion.vendedor_id if cotizacion else None,
+            ),
             created_at=now, updated_at=now,
         )
         PedidoLinea.objects.bulk_create([

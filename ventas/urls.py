@@ -18,6 +18,12 @@ from ventas.views import (
     PedidoConfirmarView,
     PedidoDetailView,
     PedidoListCreateView,
+    ReporteCarteraView,
+    ReporteClientesView,
+    ReporteEmbudoView,
+    ReporteProductosView,
+    ReporteVendedoresView,
+    ReporteVentasPeriodoView,
 )
 
 urlpatterns = [
@@ -42,4 +48,11 @@ urlpatterns = [
     path('api/ventas/facturas/', FacturaListCreateView.as_view(), name='factura-list-create'),
     path('api/ventas/facturas/<str:pk>/', FacturaDetailView.as_view(), name='factura-detail'),
     path('api/ventas/facturas/<str:pk>/nota-credito/', FacturaNotaCreditoView.as_view(), name='factura-nota-credito'),
+    # RV-01..06: reportes de ventas. Ver docs/SPRINT-REPORTES-VENTAS.md.
+    path('api/ventas/reportes/ventas-por-periodo/', ReporteVentasPeriodoView.as_view(), name='reporte-ventas-periodo'),
+    path('api/ventas/reportes/clientes/', ReporteClientesView.as_view(), name='reporte-clientes'),
+    path('api/ventas/reportes/productos/', ReporteProductosView.as_view(), name='reporte-productos'),
+    path('api/ventas/reportes/embudo/', ReporteEmbudoView.as_view(), name='reporte-embudo'),
+    path('api/ventas/reportes/cartera/', ReporteCarteraView.as_view(), name='reporte-cartera'),
+    path('api/ventas/reportes/vendedores/', ReporteVendedoresView.as_view(), name='reporte-vendedores'),
 ]

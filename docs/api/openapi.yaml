@@ -23,6 +23,10 @@ tags:
   - name: Ventas — Cotizaciones
   - name: Ventas — Pedidos
   - name: Ventas — Facturas
+  - name: Ventas — Reportes
+    description: >
+      Reportes agregados del dominio comercial (RV-01..06). Todos exigen
+      ventas:reportes:leer; con ?formato= exigen además ventas:reportes:exportar.
   - name: Núcleo — Usuarios
   - name: Núcleo — Roles y permisos
   - name: Núcleo — Sesiones
@@ -670,6 +674,296 @@ paths:
       responses:
         "200": { description: Nota de crédito emitida (factura → con_nota_credito)., content: { application/json: { schema: { $ref: "#/components/schemas/Factura" } } } }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  # ═════════════════════════════════════════ Ventas — Reportes (RV-01..06)
+  /api/ventas/reportes/ventas-por-periodo/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-01 · Facturación agregada por día, semana o mes
+      description: >
+        Venta neta = total facturado − notas de crédito. Las facturas canceladas
+        quedan fuera; una nota de crédito se imputa al periodo de SU fecha, no al
+        de la factura que corrige, para no alterar un periodo ya reportado. Solo
+        se devuelven periodos con movimiento.
+      parameters:
+        - { $ref: "#/components/parameters/repDesde" }
+        - { $ref: "#/components/parameters/repHasta" }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/repVendedor" }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - name: agrupar
+          in: query
+          schema: { type: string, enum: [dia, semana, mes], default: mes }
+      responses:
+        "200":
+          description: Sobre del reporte (JSON), o archivo si se pidió ?formato=.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SobreReporte"
+                  - type: object
+                    properties:
+                      agrupado_por: { type: string, enum: [dia, semana, mes] }
+                      resultados:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            periodo: { type: string, format: date, description: Primer día del cubo. }
+                            num_facturas: { type: integer }
+                            subtotal: { type: string }
+                            impuestos: { type: string }
+                            total_facturado: { type: string }
+                            notas_credito: { type: string }
+                            venta_neta: { type: string }
+                            ticket_promedio: { type: string }
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/reportes/clientes/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-02 · Ranking de clientes por venta neta o por volumen
+      description: >
+        Los totales agregan TODOS los clientes del rango, no solo los del top,
+        para que las participaciones sumen y el total no cambie con ?limit=.
+      parameters:
+        - { $ref: "#/components/parameters/repDesde" }
+        - { $ref: "#/components/parameters/repHasta" }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/repVendedor" }
+        - { $ref: "#/components/parameters/repLimit" }
+        - { name: orden, in: query, schema: { type: string, enum: [monto, volumen], default: monto } }
+      responses:
+        "200":
+          description: Ranking de clientes.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SobreReporte"
+                  - type: object
+                    properties:
+                      resultados:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            cliente_id: { type: string, format: uuid }
+                            razon_social: { type: string }
+                            num_facturas: { type: integer }
+                            total_facturado: { type: string }
+                            notas_credito: { type: string }
+                            venta_neta: { type: string }
+                            participacion_pct: { type: [string, "null"] }
+                            ultima_compra: { type: [string, "null"], format: date-time }
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/reportes/productos/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-03 · Ranking de productos por importe o por cantidad
+      description: >
+        IMPORTE BRUTO. Una nota de crédito no tiene desglose por línea, así que
+        las devoluciones NO se descuentan de este ranking; la respuesta y el
+        archivo exportado lo declaran en el campo `nota`.
+      parameters:
+        - { $ref: "#/components/parameters/repDesde" }
+        - { $ref: "#/components/parameters/repHasta" }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/repVendedor" }
+        - { $ref: "#/components/parameters/repLimit" }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: orden, in: query, schema: { type: string, enum: [monto, cantidad], default: monto } }
+      responses:
+        "200":
+          description: Ranking de productos.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SobreReporte"
+                  - type: object
+                    properties:
+                      resultados:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            producto_id: { type: string, format: uuid }
+                            sku: { type: string }
+                            nombre: { type: string }
+                            cantidad: { type: string }
+                            importe: { type: string }
+                            participacion_pct: { type: [string, "null"] }
+                            num_facturas: { type: integer }
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/reportes/embudo/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-04 · Embudo comercial de oportunidad a factura
+      description: >
+        Cada etapa cuenta los documentos CREADOS en el rango (flujo del periodo,
+        no foto del estado actual) y `conversion_pct` es respecto de la etapa
+        anterior, no un seguimiento documento a documento.
+      parameters:
+        - { $ref: "#/components/parameters/repDesde" }
+        - { $ref: "#/components/parameters/repHasta" }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/repVendedor" }
+      responses:
+        "200":
+          description: Etapas del embudo, tasas y motivos de pérdida.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SobreReporte"
+                  - type: object
+                    properties:
+                      resultados:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            etapa: { type: string, enum: [oportunidades, cotizaciones, pedidos, facturas] }
+                            conteo: { type: integer }
+                            monto: { type: string }
+                            conversion_pct: { type: [string, "null"], description: Null en la primera etapa. }
+                      motivos_perdida:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            motivo: { type: string }
+                            conteo: { type: integer }
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/BusinessError" }
+
+  /api/ventas/reportes/cartera/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-05 · Antigüedad de saldos por cobrar a una fecha de corte
+      description: >
+        No usa rango: es una foto a la fecha de `corte`. El saldo se reconstruye
+        A ESA FECHA (monto original menos los abonos anteriores al corte), no se
+        lee el saldo de hoy. La antigüedad cuenta DÍAS DESDE LA EMISIÓN, no días
+        vencidos: el esquema no modela fecha de vencimiento ni días de crédito.
+      parameters:
+        - { name: corte, in: query, schema: { type: string, format: date }, description: "Por defecto, hoy." }
+        - { name: cliente_id, in: query, schema: { type: string, format: uuid } }
+        - { name: detalle, in: query, schema: { type: boolean }, description: Añade el listado paginado por factura. }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/page" }
+        - { $ref: "#/components/parameters/pageSize" }
+      responses:
+        "200":
+          description: Cartera por cliente y cubo de antigüedad.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  corte: { type: string, format: date }
+                  filtros: { type: object, additionalProperties: true }
+                  alcance_vendedor: { type: [string, "null"], format: uuid }
+                  criterio: { type: string, description: Declara que la antigüedad es desde la emisión. }
+                  generado_en: { type: string, format: date-time }
+                  totales:
+                    type: object
+                    properties:
+                      num_clientes: { type: integer }
+                      num_facturas: { type: integer }
+                      saldo_total: { type: string }
+                      dias_0_30: { type: string }
+                      dias_31_60: { type: string }
+                      dias_61_90: { type: string }
+                      dias_90_mas: { type: string }
+                  resultados:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        cliente_id: { type: string, format: uuid }
+                        razon_social: { type: string }
+                        num_facturas: { type: integer }
+                        saldo_total: { type: string }
+                        dias_0_30: { type: string }
+                        dias_31_60: { type: string }
+                        dias_61_90: { type: string }
+                        dias_90_mas: { type: string }
+                  detalle:
+                    description: Solo con ?detalle=true. Página de cuentas por cobrar.
+                    allOf:
+                      - $ref: "#/components/schemas/Pagina"
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/ventas/reportes/vendedores/:
+    get:
+      tags: [Ventas — Reportes]
+      summary: RV-06 · Desempeño comercial por vendedor
+      description: >
+        Los documentos sin atribución (histórico anterior a la columna
+        vendedor_id) se agrupan en una fila con `vendedor_id: null` y nombre
+        "Sin asignar"; nunca se reparten entre los vendedores reales, y no
+        cuentan en `num_vendedores`.
+      parameters:
+        - { $ref: "#/components/parameters/repDesde" }
+        - { $ref: "#/components/parameters/repHasta" }
+        - { $ref: "#/components/parameters/repFormato" }
+        - { $ref: "#/components/parameters/repVendedor" }
+      responses:
+        "200":
+          description: Una fila por vendedor con actividad, ordenadas por venta neta.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/SobreReporte"
+                  - type: object
+                    properties:
+                      resultados:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            vendedor_id: { type: [string, "null"], format: uuid }
+                            nombre: { type: string }
+                            oportunidades_ganadas: { type: integer }
+                            oportunidades_perdidas: { type: integer }
+                            tasa_conversion_pct: { type: [string, "null"] }
+                            cotizaciones_emitidas: { type: integer }
+                            cotizaciones_aprobadas: { type: integer }
+                            pedidos_confirmados: { type: integer }
+                            num_facturas: { type: integer }
+                            facturado: { type: string }
+                            notas_credito: { type: string }
+                            venta_neta: { type: string }
+            text/csv: {}
+            application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/BusinessError" }
 
   # ═════════════════════════════════════════ Núcleo — Usuarios
@@ -1586,6 +1880,39 @@ components:
     page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
     pageSize: { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
     idPath: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    # Reportes de ventas (RV-01..06)
+    repDesde:
+      name: desde
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: Obligatorio. El rango no puede exceder 366 días.
+    repHasta:
+      name: hasta
+      in: query
+      required: true
+      schema: { type: string, format: date }
+      description: Obligatorio, y no anterior a `desde`.
+    repFormato:
+      name: formato
+      in: query
+      schema: { type: string, enum: [csv, pdf] }
+      description: >
+        Sin este parámetro devuelve JSON. Con él devuelve el archivo del reporte
+        completo y exige el permiso ventas:reportes:exportar (403 si falta).
+    repVendedor:
+      name: vendedor_id
+      in: query
+      schema: { type: string, format: uuid }
+      description: >
+        Solo lo respeta quien tiene ventas:pipeline:ver_todo. Sin ese permiso el
+        reporte se acota siempre al propio usuario, se pida lo que se pida; la
+        respuesta lo indica en `alcance_vendedor`.
+    repLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+      description: Tamaño del top. No afecta a `totales`, que agregan todo el rango.
 
   responses:
     Unauthorized:
@@ -1606,6 +1933,12 @@ components:
     BusinessError:
       description: Violación de una regla de negocio.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "cantidad excede lo pendiente de facturar.", campo: "lineas[0].cantidad", maximo_facturable: "2.000" } } }
+    ParametroInvalido:
+      description: >
+        Parámetro de consulta mal formado (enum fuera de catálogo, fecha que no
+        es fecha, limit no numérico, falta un obligatorio). Se distingue del 422,
+        que es una petición bien formada que rompe una regla de negocio.
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "agrupar debe ser uno de: dia, semana, mes.", campo: "agrupar" } } }
 
   schemas:
     Error:
@@ -1629,6 +1962,39 @@ components:
         page_size: { type: integer }
         num_pages: { type: integer }
         results: { type: array, items: {} }
+
+    SobreReporte:
+      type: object
+      description: >
+        Sobre común de los reportes de ventas. NO es el sobre paginado de los
+        listados: un agregado no es una página. Los importes son decimales en
+        string; parsearlos con librería decimal, nunca como float.
+      properties:
+        rango:
+          type: object
+          properties:
+            desde: { type: string, format: date }
+            hasta: { type: string, format: date }
+        filtros:
+          type: object
+          additionalProperties: true
+          description: Eco de los filtros recibidos (null los no enviados).
+        alcance_vendedor:
+          type: [string, "null"]
+          format: uuid
+          description: >
+            A qué vendedor quedó acotado el reporte de verdad. null = toda la
+            organización. Un usuario sin ventas:pipeline:ver_todo lo verá siempre
+            con su propio id, aunque haya pedido otro en ?vendedor_id=.
+        totales:
+          type: object
+          additionalProperties: true
+          description: Agregado de TODO el rango, sin recortar por ?limit=.
+        resultados: { type: array, items: {} }
+        nota:
+          type: string
+          description: Advertencia metodológica del reporte, cuando la tiene.
+        generado_en: { type: string, format: date-time }
 
     Me:
       type: object

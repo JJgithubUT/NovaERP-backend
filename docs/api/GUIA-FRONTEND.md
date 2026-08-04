@@ -45,24 +45,24 @@ factor (TOTP)**; en los siguientes solo lo ingresa.
 
 ```mermaid
 sequenceDiagram
-  participant FE as Frontend
-  participant API
-  FE->>API: POST /api/auth/login/ {tenant_slug, correo, password}
-  alt password válida, primer login (sin MFA)
-    API-->>FE: 200 {reto, mfa:"enroll", secret, otpauth_uri, mensaje}
-    Note over FE: Muestra el QR (otpauth_uri) para configurar<br/>la app autenticadora (Google Authenticator...)
-  else password válida, ya enrolado
-    API-->>FE: 200 {reto, mfa:"otp", mensaje}
-  else password inválida / bloqueado / inactivo
-    API-->>FE: 401 {mensaje}
-  end
-  FE->>API: POST /api/auth/otp/ {reto, codigo}
-  alt código correcto
-    API-->>FE: 200 {token, mensaje}
-    Note over FE: Guarda token; úsalo en Authorization: Bearer
-  else código incorrecto
-    API-->>FE: 401 {mensaje}
-  end
+    participant FE as Frontend
+    participant API
+    FE->>API: POST /api/auth/login/ {tenant_slug, correo, password}
+    alt password válida, primer login (sin MFA)
+        API-->>FE: 200 {reto, mfa:"enroll", secret, otpauth_uri, mensaje}
+        Note over FE: Muestra el QR para configurar<br/>la app autenticadora
+    else password válida, ya enrolado
+        API-->>FE: 200 {reto, mfa:"otp", mensaje}
+    else password inválida / bloqueado / inactivo
+        API-->>FE: 401 {mensaje}
+    end
+    FE->>API: POST /api/auth/otp/ {reto, codigo}
+    alt código correcto
+        API-->>FE: 200 {token, mensaje}
+        Note over FE: Guarda token y usalo en Bearer
+    else código incorrecto
+        API-->>FE: 401 {mensaje}
+    end
 ```
 
 **Puntos clave para el FE:**

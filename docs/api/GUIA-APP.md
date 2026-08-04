@@ -119,7 +119,7 @@ Llama a `/me` justo después del login y guarda el resultado:
 | Dominio | Recursos (acciones típicas: `leer`, `crear`, `editar`, `eliminar`) |
 |---|---|
 | `core` | `usuarios`, `roles`, `asignaciones`, `sesiones`, `politicas`, `bitacora`, `reportes` |
-| `ventas` | `clientes`, `oportunidades`, `pipeline:ver_todo`, `cotizaciones` (+ `aprobar`, `ajustar_precio`), `pedidos` (+ `cancelar`), `facturas` (+ `cancelar`) |
+| `ventas` | `clientes`, `oportunidades`, `pipeline:ver_todo`, `cotizaciones` (+ `aprobar`, `ajustar_precio`), `pedidos` (+ `cancelar`), `facturas` (+ `cancelar`), `reportes` (`leer`, `exportar`) |
 | `compras` | `proveedores`, `ordenes` (+ `aprobar`, `cancelar`), `recepciones`, `cuentas_por_pagar`, `config_aprobacion` |
 | `inventario` | `productos`, `almacenes`, `movimientos`, `ajustes`, `transferencias`, `stock`, `kardex`, `valuacion`, `alertas` (+ `notificar`) |
 | `finanzas` | `credito:autorizar` (autorizar excepción de límite de crédito) |
@@ -193,6 +193,12 @@ flowchart LR
 | Cotizaciones | `.../cotizaciones/` + `…/{id}/resolver/` | Precio del catálogo; descuento alto → aprobación; `vencida` derivada. |
 | Pedidos | `.../pedidos/` + `…/{id}/confirmar/`, `…/{id}/cancelar/` | **Confirmar** reserva stock (`almacen_id`) y valida crédito. |
 | Facturas | `.../facturas/` + `…/{id}/nota-credito/` | Parcial/total; descuenta stock, crea CxC; NC revierte. |
+| Reportes | `.../reportes/{ventas-por-periodo,clientes,productos,embudo,cartera,vendedores}/` | `ventas:reportes:leer`; `?formato=csv\|pdf` exige `:exportar`. Alcance por vendedor según `ventas:pipeline:ver_todo`. |
+
+**Detalle de los reportes en [`FLUJO-VENTAS-REPORTES.md`](./FLUJO-VENTAS-REPORTES.md)** —
+incluye qué NO mide cada cifra (el ranking de productos no descuenta devoluciones; la
+cartera mide días desde emisión, no vencidos), que es justo lo que hay que reflejar en
+las etiquetas de la UI.
 
 ### 5.5 Compras
 Del proveedor a la cuenta por pagar. La **recepción** mueve el inventario y genera la

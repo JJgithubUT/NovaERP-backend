@@ -1,67 +1,18 @@
-import csv
-from io import BytesIO
-
 from django.db.models import Count, Max, OuterRef, Subquery
-from django.http import HttpResponse
 from django.utils import timezone
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from core.models import LogAuditoria, Sesion, Usuario
 from core.utils.audit import audit_context, client_ip
 from core.utils.auth import get_tenant, tenant_scoped
+from core.utils.export import FORMATOS_EXPORT, entregar, filtros_de, metadatos, nombre_archivo
 from core.utils.pagination import paginate
 
 # Operaciones CUD que cuentan como "acciones registradas" en el reporte (RF-23).
 OPERACIONES_CUD = ("INSERT", "UPDATE", "DELETE")
 
-FORMATOS_EXPORT = ("csv", "pdf")
-
-_ESTILO_CELDA = ParagraphStyle("celda", fontName="Helvetica", fontSize=6, leading=7)
-_ESTILO_CABECERA = ParagraphStyle("cab", fontName="Helvetica-Bold", fontSize=6, leading=7, textColor=colors.white)
-_ESTILO_META = ParagraphStyle("meta", fontName="Helvetica", fontSize=8, leading=11)
-_ESTILO_TITULO = ParagraphStyle("titulo", fontName="Helvetica-Bold", fontSize=14, leading=18)
-
-
-def _pdf_tabla(titulo, metadatos, columnas, filas):
-    """PDF tabular con titulo + metadatos + tabla, en A4 apaisado. Cada celda va
-    en un Paragraph para que el texto largo (UUIDs, JSON) haga wrap en su
-    columna en vez de desbordar. reportlab pagina solo y repite la cabecera."""
-    buf = BytesIO()
-    doc = SimpleDocTemplate(
-        buf, pagesize=landscape(A4),
-        leftMargin=1 * cm, rightMargin=1 * cm, topMargin=1 * cm, bottomMargin=1 * cm,
-    )
-    elementos = [Paragraph(titulo, _ESTILO_TITULO), Spacer(1, 6)]
-    for m in metadatos:
-        elementos.append(Paragraph(m, _ESTILO_META))
-    elementos.append(Spacer(1, 10))
-
-    data = [[Paragraph(str(col), _ESTILO_CABECERA) for col in columnas]]
-    for fila in filas:
-        data.append([Paragraph("" if v is None else str(v), _ESTILO_CELDA) for v in fila])
-
-    tabla = Table(data, repeatRows=1)
-    tabla.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#334155")),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f1f5f9")]),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 3),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
-    ]))
-    elementos.append(tabla)
-    doc.build(elementos)
-    return buf.getvalue()
-
-
-def _respuesta_archivo(contenido, content_type, nombre):
-    resp = HttpResponse(contenido, content_type=content_type)
-    resp["Content-Disposition"] = f'attachment; filename="{nombre}"'
-    return resp
+# Reexportado a proposito: las vistas y las pruebas de RF-23/RF-24 ya lo
+# importan desde aqui, y el formato valido es el mismo para todo el sistema.
+__all__ = ["FORMATOS_EXPORT"]
 
 
 # ------------------------------------------------------------- RF-21
@@ -127,21 +78,6 @@ def _fila_bitacora(e):
     ]
 
 
-def _csv_bytes(titulo, metadatos, columnas, filas):
-    from io import StringIO
-
-    s = StringIO()
-    w = csv.writer(s)
-    w.writerow([f"# {titulo}"])
-    for m in metadatos:
-        w.writerow([f"# {m}"])
-    w.writerow([])
-    w.writerow(columnas)
-    for fila in filas:
-        w.writerow(fila)
-    return s.getvalue().encode("utf-8")
-
-
 def exportar_bitacora(request, formato):
     """RF-24: exporta la consulta (mismos filtros y alcance de RF-21, RN01) a
     CSV o PDF (CA01). Metadatos de generacion en el archivo (CA02). La
@@ -150,17 +86,8 @@ def exportar_bitacora(request, formato):
     qs = _bitacora_filtrada(request)
     ahora = timezone.now()
 
-    filtros = {
-        k: request.GET.get(k)
-        for k in ("usuario_id", "operacion", "entidad", "desde", "hasta")
-        if request.GET.get(k)
-    }
-    metadatos = [
-        f"Tenant: {tenant.slug}",
-        f"Generado por: {request.usuario_id}",
-        f"Fecha: {ahora.isoformat()}",
-        f"Filtros: {filtros or 'ninguno'}",
-    ]
+    filtros = filtros_de(request, ("usuario_id", "operacion", "entidad", "desde", "hasta"))
+    meta = metadatos(request, tenant, ahora, filtros)
     filas = [_fila_bitacora(e) for e in qs.iterator()]
 
     # RN02/CA03: se audita ANTES de entregar el archivo, con el formato usado.
@@ -177,13 +104,9 @@ def exportar_bitacora(request, formato):
             valores_despues={"filtros": filtros, "formato": formato},
         )
 
-    nombre = f"bitacora_{tenant.slug}_{ahora:%Y%m%d_%H%M%S}.{formato}"
-    if formato == "pdf":
-        pdf = _pdf_tabla("Bitacora de auditoria - NovaERP", metadatos, COLUMNAS_BITACORA, filas)
-        return _respuesta_archivo(pdf, "application/pdf", nombre)
-    return _respuesta_archivo(
-        _csv_bytes("Bitacora de auditoria - NovaERP", metadatos, COLUMNAS_BITACORA, filas),
-        "text/csv; charset=utf-8", nombre,
+    return entregar(
+        formato, "Bitacora de auditoria - NovaERP", meta, COLUMNAS_BITACORA, filas,
+        nombre_archivo(tenant, "bitacora", ahora, formato),
     )
 
 
@@ -260,27 +183,14 @@ def exportar_actividad(request, formato):
     """RF-23/CA03: exporta el reporte completo a CSV o PDF."""
     tenant = get_tenant(request)
     ahora = timezone.now()
-    filtros = {
-        k: request.GET.get(k)
-        for k in ("desde", "hasta", "departamento", "puesto")
-        if request.GET.get(k)
-    }
-    metadatos = [
-        f"Tenant: {tenant.slug}",
-        f"Generado por: {request.usuario_id}",
-        f"Fecha: {ahora.isoformat()}",
-        f"Filtros: {filtros or 'ninguno'}",
-    ]
+    filtros = filtros_de(request, ("desde", "hasta", "departamento", "puesto"))
+    meta = metadatos(request, tenant, ahora, filtros)
     filas = [
         [d[c] for c in COLUMNAS_ACTIVIDAD]
         for d in (_serialize_actividad(u) for u in _actividad_queryset(request).iterator())
     ]
 
-    nombre = f"actividad_{tenant.slug}_{ahora:%Y%m%d_%H%M%S}.{formato}"
-    if formato == "pdf":
-        pdf = _pdf_tabla("Reporte de actividad de usuarios - NovaERP", metadatos, COLUMNAS_ACTIVIDAD, filas)
-        return _respuesta_archivo(pdf, "application/pdf", nombre)
-    return _respuesta_archivo(
-        _csv_bytes("Reporte de actividad de usuarios - NovaERP", metadatos, COLUMNAS_ACTIVIDAD, filas),
-        "text/csv; charset=utf-8", nombre,
+    return entregar(
+        formato, "Reporte de actividad de usuarios - NovaERP", meta, COLUMNAS_ACTIVIDAD, filas,
+        nombre_archivo(tenant, "actividad", ahora, formato),
     )

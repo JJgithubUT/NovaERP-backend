@@ -223,9 +223,12 @@ curl -X POST http://127.0.0.1:8000/api/admin/login/ \
 
 ### Colección de peticiones
 
-El archivo **`test.http`** (REST Client de VS Code) documenta ejemplos de todos
-los endpoints: autenticación, núcleo, portal de plataforma, y el bloque de
-Ventas (oportunidades, cotizaciones, pedidos, facturas).
+El archivo **`test.http`** trae un ejemplo `curl` de cada una de las **106
+operaciones** de `docs/api/openapi.yaml`, en el mismo formato que los dos bloques
+de arriba: autenticación, núcleo, portal de plataforma, compras, inventario y
+ventas (oportunidades, cotizaciones, pedidos, facturas, reportes), más los casos
+de error de cada regla de negocio. Se copia y se pega por bloques; las variables
+(`$HOST`, `$TOKEN`, los ids) se definen al principio de cada sección.
 
 ---
 

@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from core.models import ConfigSeguridadTenant, Notificacion, Rol, Usuario, UsuarioRol
 from core.services import session_service
+from core.utils import filtros
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
@@ -256,25 +257,24 @@ def directorio_usuarios(request):
             | Q(puesto__icontains=search)
         )
 
-    estado = request.GET.get("estado")
-    if estado:
-        qs = qs.filter(estado=estado)
-
-    departamento = request.GET.get("departamento")
-    if departamento:
-        qs = qs.filter(departamento=departamento)
+    for campo, val in filtros.filtros_validados(
+        Usuario, request, ("estado", "departamento")
+    ).items():
+        qs = qs.filter(**{campo: val})
 
     rol_id = request.GET.get("rol")
     if rol_id:
+        # No es un campo de Usuario: se valida a mano como uuid.
+        filtros.uuid_o_400(rol_id, "rol")
         qs = qs.filter(core_usuario_rol_usuario_set__rol_id=rol_id).distinct()
 
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(created_at__gte=desde)
     if hasta:
         qs = qs.filter(created_at__lte=hasta)
 
-    campo = _ORDEN_DIRECTORIO.get((request.GET.get("orden") or "nombre").strip(), "nombre_completo")
+    campo = _ORDEN_DIRECTORIO[filtros.clave_orden(request, _ORDEN_DIRECTORIO, "nombre")]
     if request.GET.get("desc", "").strip().lower() in _TRUE:
         campo = "-" + campo
     qs = qs.order_by(campo)

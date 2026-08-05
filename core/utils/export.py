@@ -23,7 +23,25 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+from core.utils.errors import ParametroInvalido
+
 FORMATOS_EXPORT = ("csv", "pdf")
+
+
+def formato_pedido(request, default=""):
+    """Formato de exportacion normalizado, o "" si no se pidio ninguno.
+
+    Un formato desconocido es 400 y no un silencioso "te devuelvo JSON": quien
+    pide un PDF y recibe otra cosa no tiene forma de notarlo. Es el unico lugar
+    donde se valida, para que los tres endpoints exportables (RF-23, RF-24 y los
+    reportes de ventas) respondan igual ante lo mismo.
+    """
+    valor = (request.GET.get("formato") or default).strip().lower()
+    if valor and valor not in FORMATOS_EXPORT:
+        raise ParametroInvalido(
+            f"formato debe ser uno de: {', '.join(FORMATOS_EXPORT)}.", campo="formato"
+        )
+    return valor
 
 _ESTILO_CELDA = ParagraphStyle("celda", fontName="Helvetica", fontSize=6, leading=7)
 _ESTILO_CABECERA = ParagraphStyle("cab", fontName="Helvetica-Bold", fontSize=6, leading=7, textColor=colors.white)

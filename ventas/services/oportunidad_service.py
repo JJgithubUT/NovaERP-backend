@@ -8,6 +8,7 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.pagination import paginate
 from core.utils.permissions import PermissionDeniedError
 from ventas.models import Cliente, Oportunidad
@@ -145,12 +146,12 @@ def listar_oportunidades(request):
     tenant = get_tenant(request)
     qs = _scope(Oportunidad.objects.filter(tenant=tenant), request)
 
-    for campo in ("cliente_id", "etapa", "estado", "responsable_id"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
+    for campo, val in filtros.filtros_validados(
+        Oportunidad, request, ("cliente_id", "etapa", "estado", "responsable_id")
+    ).items():
+        qs = qs.filter(**{campo: val})
 
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(fecha_cierre_estimada__gte=desde)
     if hasta:

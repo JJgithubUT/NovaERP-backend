@@ -30,6 +30,7 @@ from core.services.usuario_service import (
     _validar_password,
     ESTADOS_QUE_CONSUMEN_LICENCIA,
 )
+from core.utils import filtros
 from core.utils.audit import audit_context, client_ip, sysadmin_context
 from core.utils.errors import BusinessRuleError
 from core.utils.pagination import paginate
@@ -356,19 +357,19 @@ def listar_tenants(request):
 
     estado = request.GET.get("estado")
     if estado:
-        qs = qs.filter(estado=estado)
+        qs = qs.filter(estado=filtros.validar_filtro(Tenant, "estado", estado))
 
     plan = request.GET.get("plan")
     if plan:
         qs = qs.filter(plan__codigo=plan)
 
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(created_at__gte=desde)
     if hasta:
         qs = qs.filter(created_at__lte=hasta)
 
-    campo = _ORDEN_TENANTS.get((request.GET.get("orden") or "razon_social").strip(), "razon_social")
+    campo = _ORDEN_TENANTS[filtros.clave_orden(request, _ORDEN_TENANTS, "razon_social")]
     if request.GET.get("desc", "").strip().lower() in _TRUE:
         campo = "-" + campo
     qs = qs.order_by(campo)

@@ -17,6 +17,7 @@ from django.utils import timezone
 from core.models import Usuario
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError, ParametroInvalido
+from core.utils.filtros import opcion_o_400, uuid_o_400
 from core.utils.export import entregar, filtros_de, metadatos, nombre_archivo
 from core.utils.pagination import paginate
 from inventario.models import Producto
@@ -79,10 +80,7 @@ def rango(request):
 
 def agrupacion(request, default="mes"):
     valor = (request.GET.get("agrupar") or default).strip().lower()
-    if valor not in AGRUPACIONES:
-        raise ParametroInvalido(
-            f"agrupar debe ser uno de: {', '.join(AGRUPACIONES)}.", campo="agrupar"
-        )
+    opcion_o_400(valor, "agrupar", list(AGRUPACIONES))
     return valor, AGRUPACIONES[valor]
 
 
@@ -99,6 +97,14 @@ def limite(request, default=10, maximo=100):
     return n
 
 
+def cliente_filtro(request):
+    """?cliente_id= validado como uuid (400 si no lo es), o None si no viene.
+    Ninguna consulta de este modulo debe leer request.GET['cliente_id'] directo:
+    un uuid mal formado abortaria la consulta en Postgres con un 500."""
+    valor = request.GET.get("cliente_id")
+    return uuid_o_400(valor, "cliente_id") if valor else None
+
+
 def vendedor_efectivo(request):
     """RN-04: quien puede ver todo filtra por el ?vendedor_id= que pida; quien
     no, se ve solo a si mismo, pida lo que pida.
@@ -109,7 +115,8 @@ def vendedor_efectivo(request):
     directamente.
     """
     if ve_todo(request):
-        return request.GET.get("vendedor_id")
+        valor = request.GET.get("vendedor_id")
+        return uuid_o_400(valor, "vendedor_id") if valor else None
     return str(request.usuario_id)
 
 
@@ -148,12 +155,10 @@ def _participacion(valor, total):
 
 
 def _orden(request, permitidos, default):
+    """Mismo criterio que el resto de la API (core.utils.filtros.clave_orden): un
+    valor fuera del catalogo es 400, no un fallback silencioso."""
     valor = (request.GET.get("orden") or default).strip().lower()
-    if valor not in permitidos:
-        raise ParametroInvalido(
-            f"orden debe ser uno de: {', '.join(permitidos)}.", campo="orden"
-        )
-    return valor
+    return opcion_o_400(valor, "orden", permitidos)
 
 
 # ------------------------------------------------------------- bases comunes
@@ -165,8 +170,9 @@ def facturas_del_rango(tenant, inicio, fin, request=None):
         fecha_emision__gte=inicio, fecha_emision__lt=fin,
     )
     if request is not None:
-        if request.GET.get("cliente_id"):
-            qs = qs.filter(cliente_id=request.GET["cliente_id"])
+        cliente = cliente_filtro(request)
+        if cliente:
+            qs = qs.filter(cliente_id=cliente)
         vendedor = vendedor_efectivo(request)  # RN-04
         if vendedor:
             qs = qs.filter(vendedor_id=vendedor)
@@ -181,8 +187,9 @@ def notas_credito_del_rango(tenant, inicio, fin, request=None):
         tenant=tenant, created_at__gte=inicio, created_at__lt=fin,
     )
     if request is not None:
-        if request.GET.get("cliente_id"):
-            qs = qs.filter(factura__cliente_id=request.GET["cliente_id"])
+        cliente = cliente_filtro(request)
+        if cliente:
+            qs = qs.filter(factura__cliente_id=cliente)
         vendedor = vendedor_efectivo(request)  # RN-04
         if vendedor:
             qs = qs.filter(factura__vendedor_id=vendedor)
@@ -444,8 +451,9 @@ def ranking_productos(request):
         factura__fecha_emision__gte=inicio,
         factura__fecha_emision__lt=fin,
     )
-    if request.GET.get("cliente_id"):
-        qs = qs.filter(factura__cliente_id=request.GET["cliente_id"])
+    cliente = cliente_filtro(request)
+    if cliente:
+        qs = qs.filter(factura__cliente_id=cliente)
     vendedor = vendedor_efectivo(request)  # RN-04
     if vendedor:
         qs = qs.filter(factura__vendedor_id=vendedor)
@@ -719,8 +727,9 @@ def cartera(request):
     )
 
     qs = CuentaPorCobrar.objects.filter(tenant=tenant, created_at__lt=fin)
-    if request.GET.get("cliente_id"):
-        qs = qs.filter(cliente_id=request.GET["cliente_id"])
+    cliente = cliente_filtro(request)
+    if cliente:
+        qs = qs.filter(cliente_id=cliente)
     vendedor = vendedor_efectivo(request)  # RN-04
     if vendedor:
         qs = qs.filter(factura__vendedor_id=vendedor)

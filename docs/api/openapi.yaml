@@ -263,6 +263,7 @@ paths:
                   - type: object
                     properties:
                       results: { type: array, items: { $ref: "#/components/schemas/Oportunidad" } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -419,6 +420,7 @@ paths:
                   - type: object
                     properties:
                       results: { type: array, items: { $ref: "#/components/schemas/Cotizacion" } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -523,6 +525,7 @@ paths:
                   - type: object
                     properties:
                       results: { type: array, items: { $ref: "#/components/schemas/Pedido" } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -662,6 +665,7 @@ paths:
                   - type: object
                     properties:
                       results: { type: array, items: { $ref: "#/components/schemas/Factura" } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -1077,6 +1081,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Usuario" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -1406,6 +1411,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/EventoAuditoria" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/core/bitacora/export/:
@@ -1424,6 +1430,7 @@ paths:
         - { name: hasta, in: query, schema: { type: string, format: date } }
       responses:
         "200": { description: Archivo CSV o PDF., content: { text/csv: {}, application/pdf: {} } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/core/reportes/actividad/:
@@ -1450,6 +1457,7 @@ paths:
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/ActividadUsuario" } } }
             text/csv: {}
             application/pdf: {}
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
@@ -1521,6 +1529,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Tenant" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
     post:
       tags: [Plataforma — Tenants (SysAdmin)]
@@ -1725,6 +1734,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/OrdenCompra" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -1816,6 +1826,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Recepcion" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -1872,6 +1883,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/CuentaPorPagar" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/compras/config-aprobacion/:
@@ -2049,6 +2061,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Movimiento" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -2095,6 +2108,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/AjusteInventario" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -2140,6 +2154,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/Transferencia" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
     post:
@@ -2186,6 +2201,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/StockDisponible" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/kardex/:
@@ -2216,6 +2232,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/FilaKardex" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/valuacion/:
@@ -2237,6 +2254,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/FilaValuacion" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/alertas-stock-minimo/:
@@ -2260,6 +2278,7 @@ paths:
                   - { $ref: "#/components/schemas/Pagina" }
                   - type: object
                     properties: { results: { type: array, items: { $ref: "#/components/schemas/AlertaStockMinimo" } } }
+        "400": { $ref: "#/components/responses/ParametroInvalido" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
   /api/inventario/alertas-stock-minimo/{id}/notificar/:
@@ -2346,9 +2365,13 @@ components:
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "cantidad excede lo pendiente de facturar.", campo: "lineas[0].cantidad", maximo_facturable: "2.000" } } }
     ParametroInvalido:
       description: >
-        Parámetro de consulta mal formado (enum fuera de catálogo, fecha que no
-        es fecha, limit no numérico, falta un obligatorio). Se distingue del 422,
-        que es una petición bien formada que rompe una regla de negocio.
+        Parámetro de consulta mal formado: valor fuera del catálogo de un enum,
+        UUID que no es un UUID, fecha que no es fecha, limit no numérico, o falta
+        uno obligatorio. `campo` señala cuál. Se distingue del 422, que es una
+        petición bien formada que rompe una regla de negocio.
+
+        Un id **bien formado** que no existe (o es de otro tenant) no es un 400:
+        devuelve una página vacía, para no revelar qué existe en otros tenants.
       content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, example: { detail: "agrupar debe ser uno de: dia, semana, mes.", campo: "agrupar" } } }
 
   schemas:

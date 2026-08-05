@@ -7,6 +7,7 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.pagination import paginate
 from finanzas.models import CuentaPorCobrar
 from inventario.models import Movimiento
@@ -195,11 +196,11 @@ def listar_facturas(request):
     """RF-43: listado paginado con filtros por cliente, estado y rango de fecha."""
     tenant = get_tenant(request)
     qs = FacturaVenta.objects.filter(tenant=tenant)
-    for campo in ("cliente_id", "estado", "pedido_id"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    for campo, val in filtros.filtros_validados(
+        FacturaVenta, request, ("cliente_id", "estado", "pedido_id")
+    ).items():
+        qs = qs.filter(**{campo: val})
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(fecha_emision__gte=desde)
     if hasta:

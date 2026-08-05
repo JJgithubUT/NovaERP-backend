@@ -17,6 +17,7 @@ from core.services import usuario_service as usuario_svc
 from core.services.auth_service import LoginError
 from core.utils.auth import UNAUTHORIZED, LoginRequiredMixin, tenant_scoped
 from core.utils.errors import BusinessRuleError
+from core.utils.export import formato_pedido
 from core.utils.permissions import (
     SIN_PERMISO,
     PermissionDeniedError,
@@ -380,9 +381,7 @@ class BitacoraExportView(PermissionRequiredMixin, View):
     permiso_requerido = "core:bitacora:exportar"
 
     def get(self, request):
-        formato = (request.GET.get("formato") or "csv").strip().lower()
-        if formato not in auditoria_svc.FORMATOS_EXPORT:
-            return JsonResponse({"detail": "formato debe ser csv o pdf."}, status=400)
+        formato = formato_pedido(request, default="csv")
         try:
             return auditoria_svc.exportar_bitacora(request, formato)
         except Tenant.DoesNotExist:
@@ -398,9 +397,9 @@ class ReporteActividadView(PermissionRequiredMixin, View):
     permiso_requerido = "core:reportes:leer"
 
     def get(self, request):
-        formato = (request.GET.get("formato") or "").strip().lower()
+        formato = formato_pedido(request)
         try:
-            if formato in auditoria_svc.FORMATOS_EXPORT:
+            if formato:
                 return auditoria_svc.exportar_actividad(request, formato)
             return JsonResponse(auditoria_svc.reporte_actividad(request))
         except Tenant.DoesNotExist:

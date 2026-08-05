@@ -2,17 +2,18 @@ from django.db.models import Count, Max, OuterRef, Subquery
 from django.utils import timezone
 
 from core.models import LogAuditoria, Sesion, Usuario
+from core.utils import filtros
 from core.utils.audit import audit_context, client_ip
 from core.utils.auth import get_tenant, tenant_scoped
-from core.utils.export import FORMATOS_EXPORT, entregar, filtros_de, metadatos, nombre_archivo
+from core.utils.export import entregar, filtros_de, metadatos, nombre_archivo
 from core.utils.pagination import paginate
 
 # Operaciones CUD que cuentan como "acciones registradas" en el reporte (RF-23).
 OPERACIONES_CUD = ("INSERT", "UPDATE", "DELETE")
 
-# Reexportado a proposito: las vistas y las pruebas de RF-23/RF-24 ya lo
-# importan desde aqui, y el formato valido es el mismo para todo el sistema.
-__all__ = ["FORMATOS_EXPORT"]
+# El catalogo de formatos y su validacion viven en core.utils.export
+# (formato_pedido): antes se reexportaban desde aqui, pero ahora las vistas los
+# toman de su origen y este modulo solo genera los archivos.
 
 
 # ------------------------------------------------------------- RF-21
@@ -23,19 +24,12 @@ def _bitacora_filtrada(request):
     el propio filtro) y con los filtros de CA01."""
     qs = tenant_scoped(LogAuditoria.objects.all(), request)
 
-    usuario_id = request.GET.get("usuario_id")
-    if usuario_id:
-        qs = qs.filter(usuario_id=usuario_id)
+    for campo, val in filtros.filtros_validados(
+        LogAuditoria, request, ("usuario_id", "operacion", "entidad")
+    ).items():
+        qs = qs.filter(**{campo: val})
 
-    operacion = request.GET.get("operacion")
-    if operacion:
-        qs = qs.filter(operacion=operacion)
-
-    entidad = request.GET.get("entidad")
-    if entidad:
-        qs = qs.filter(entidad=entidad)
-
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(ocurrido_en__gte=desde)
     if hasta:
@@ -115,7 +109,7 @@ def exportar_bitacora(request, formato):
 def _actividad_queryset(request):
     """Queryset del reporte de actividad (compartido por la vista JSON y las
     exportaciones)."""
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
 
     sesiones_sub = Sesion.objects.filter(usuario_id=OuterRef("id"))
     cud_sub = LogAuditoria.objects.filter(

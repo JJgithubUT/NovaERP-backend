@@ -8,7 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from core.models import Tenant
 from core.utils.auth import UNAUTHORIZED
 from core.utils.errors import BusinessRuleError, ParametroInvalido
-from core.utils.export import FORMATOS_EXPORT
+from core.utils.export import formato_pedido
 from core.utils.permissions import (
     PermissionDeniedError, PermissionRequiredMixin, exigir_permiso,
 )
@@ -409,11 +409,9 @@ class ReporteView(PermissionRequiredMixin, View):
     exportar_fn = None
 
     def get(self, request):
-        formato = (request.GET.get("formato") or "").strip().lower()
         try:
+            formato = formato_pedido(request)
             if formato:
-                if formato not in FORMATOS_EXPORT:
-                    return JsonResponse({"detail": "formato debe ser csv o pdf."}, status=400)
                 exigir_permiso(request, self.permiso_exportar)
                 return self.exportar_fn(request, formato)
             return JsonResponse(self.reporte_fn(request))

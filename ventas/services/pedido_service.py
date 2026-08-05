@@ -7,6 +7,7 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.permissions import exigir_permiso
 from core.utils.pagination import paginate
 from inventario.models import Almacen, Producto
@@ -247,11 +248,11 @@ def listar_pedidos(request):
     """RF-39: listado paginado con filtros por cliente, estado y rango de fecha."""
     tenant = get_tenant(request)
     qs = PedidoVenta.objects.filter(tenant=tenant)
-    for campo in ("cliente_id", "estado"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    for campo, val in filtros.filtros_validados(
+        PedidoVenta, request, ("cliente_id", "estado")
+    ).items():
+        qs = qs.filter(**{campo: val})
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(created_at__gte=desde)
     if hasta:

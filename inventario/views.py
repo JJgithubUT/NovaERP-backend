@@ -1,9 +1,9 @@
-from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
+from core.utils import filtros
 from core.utils.auth import tenant_scoped
 from core.utils.pagination import paginate
 from core.utils.permissions import PermissionRequiredMixin
@@ -40,9 +40,10 @@ class FiltroPorIdMixin:
     la definicion de la vista en Postgres.
 
     La traduccion es segura porque ambas claves naturales son unicas por tenant
-    (lo validan crear_producto y crear_almacen). Un id inexistente, de otro
-    tenant o malformado devuelve cero filas: es un filtro, no un 404, y no debe
-    revelar si el registro existe en otro tenant.
+    (lo validan crear_producto y crear_almacen). Un id que no es un uuid responde
+    400 (igual que en el resto de la API); uno bien formado que no existe o es de
+    otro tenant devuelve cero filas: es un filtro, no un 404, y no debe revelar
+    si el registro existe en otro tenant.
     """
 
     campo_producto = "sku"
@@ -56,10 +57,8 @@ class FiltroPorIdMixin:
             valor = (request.GET.get(param) or "").strip()
             if not valor:
                 continue
-            try:
-                obj = tenant_scoped(modelo.objects.all(), request).filter(pk=valor).first()
-            except (ValidationError, ValueError):
-                obj = None
+            filtros.uuid_o_400(valor, param)
+            obj = tenant_scoped(modelo.objects.all(), request).filter(pk=valor).first()
             if obj is None:
                 return qs.none()
             qs = qs.filter(**{campo: getattr(obj, atributo)})
@@ -167,13 +166,10 @@ class AlertaStockMinimoListView(PermissionRequiredMixin, View):
     def get(self, request):
         qs = tenant_scoped(AlertaStockMinimo.objects.all(), request).order_by("-disparada_en")
 
-        producto_id = request.GET.get("producto_id")
-        if producto_id:
-            qs = qs.filter(producto_id=producto_id)
-
-        almacen_id = request.GET.get("almacen_id")
-        if almacen_id:
-            qs = qs.filter(almacen_id=almacen_id)
+        for campo, valor in filtros.filtros_validados(
+            AlertaStockMinimo, request, ("producto_id", "almacen_id")
+        ).items():
+            qs = qs.filter(**{campo: valor})
 
         notificada = request.GET.get("notificada")
         if notificada is not None:

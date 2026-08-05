@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from core.models import Tenant
 from core.utils.auth import UNAUTHORIZED, get_tenant, tenant_scoped
 from core.utils.errors import BusinessRuleError
+from core.utils.filtros import rango_validado, validar_filtro
 from core.utils.pagination import paginate
 from core.utils.permissions import PermissionDeniedError, PermissionRequiredMixin
 
@@ -19,15 +20,19 @@ TRUE_VALUES = {"1", "true", "si", "sí"}
 def _apply_filters(qs, request, filter_fields, date_field):
     """Filtros exactos ?<campo>=valor por cada entrada de filter_fields, mas
     un rango ?desde=&hasta= sobre date_field si esta definido. Compartido
-    entre ListCreateView y ReadOnlyListView."""
+    entre ListCreateView y ReadOnlyListView.
+
+    Cada valor se valida antes de entrar al queryset (ver core.utils.filtros):
+    sin eso, un uuid mal escrito o un valor fuera del ENUM abortan la consulta
+    en Postgres y la vista responde 500 en vez de 400.
+    """
     for field in filter_fields:
         value = request.GET.get(field)
         if value:
-            qs = qs.filter(**{field: value})
+            qs = qs.filter(**{field: validar_filtro(qs.model, field, value)})
 
     if date_field:
-        desde = request.GET.get("desde")
-        hasta = request.GET.get("hasta")
+        desde, hasta = rango_validado(request)
         if desde:
             qs = qs.filter(**{f"{date_field}__gte": desde})
         if hasta:

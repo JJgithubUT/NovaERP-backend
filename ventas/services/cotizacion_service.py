@@ -8,6 +8,7 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.pagination import paginate
 from core.utils.permissions import exigir_permiso, tiene_permiso
 from inventario.models import Producto
@@ -205,11 +206,11 @@ def listar_cotizaciones(request):
     tenant = get_tenant(request)
     qs = Cotizacion.objects.filter(tenant=tenant)
 
-    for campo in ("cliente_id", "estado"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    for campo, val in filtros.filtros_validados(
+        Cotizacion, request, ("cliente_id", "estado")
+    ).items():
+        qs = qs.filter(**{campo: val})
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(created_at__gte=desde)
     if hasta:

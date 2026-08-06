@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     # Sin contenttypes/auth/sessions/admin/messages: no los necesitamos y
     # así nunca se crean tablas django_* en la base de datos.
     'django.contrib.staticfiles',
+    'corsheaders',
 
     # Tus apps de dominio (una por esquema de Postgres)
     'core',
@@ -82,10 +83,19 @@ INSTALLED_APPS = [
 # Modifica los Middlewares quitando las sesiones y auth antiguas
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'core.middleware.auth_middleware.JWTCustomMiddleware',
+]
+
+# CORS: el frontend (Angular) corre en un origen distinto durante desarrollo.
+# CORS_ALLOWED_ORIGINS por .env, coma-separado (sin barra final). El login
+# manda el JWT en el header Authorization, no en cookies, asi que por ahora
+# no se necesita CORS_ALLOW_CREDENTIALS.
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:4200').split(',') if o.strip()
 ]
 
 ROOT_URLCONF = 'novaerp_backend.urls'

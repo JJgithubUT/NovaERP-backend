@@ -29,6 +29,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid(), digest()
 CREATE EXTENSION IF NOT EXISTS citext;      -- correos case-insensitive únicos
 CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- búsquedas ILIKE rápidas (RF-02,RF-06,RF-27...)
 
+SET client_encoding TO 'UTF8';
+
 CREATE SCHEMA IF NOT EXISTS core;
 SET search_path TO core, public;
 

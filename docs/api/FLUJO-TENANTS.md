@@ -437,6 +437,8 @@ Dentro del tenant, el TENANT_ADMIN consulta su propia bitácora con
 Consola de plataforma (token typ:"sysadmin")
   POST   /api/admin/login/                        una fase, sin MFA
   POST   /api/admin/logout/
+  GET    /api/admin/me/                           identidad + sesión en curso (rehidratar el shell)
+  GET    /api/admin/catalogos/                    planes · módulos · dependencias · dominios reservados
   GET    /api/admin/tenants/                      ?estado= ?plan= ?search= ?desde= ?hasta=
                                                   ?orden=razon_social|created_at|estado|plan &desc=
                                                   paginado, máx. 50/página
@@ -445,6 +447,7 @@ Consola de plataforma (token typ:"sysadmin")
   PATCH  /api/admin/tenants/{id}/                 datos · plan · módulos (cascada)
   POST   /api/admin/tenants/{id}/suspender/       {tipo, motivo}  (?baja=true → baja lógica)
   POST   /api/admin/tenants/{id}/reactivar/
+  POST   /api/admin/tenants/{id}/reenviar-activacion/   reemite el enlace (rota el token)
 
 Público (sin sesión)
   POST   /api/auth/activar-tenant/                {token, password} → activa en cascada

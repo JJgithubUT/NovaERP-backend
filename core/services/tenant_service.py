@@ -11,7 +11,6 @@ from core.models import (
     DominioReservado,
     LogAuditoria,
     Modulo,
-    ModuloDependencia,
     PlanComercial,
     PlanModulo,
     Rol,
@@ -20,7 +19,7 @@ from core.models import (
     Usuario,
     UsuarioRol,
 )
-from core.services import session_service
+from core.services import catalogo_service, session_service
 from core.services.usuario_service import (
     ACTIVACION_VIGENCIA,
     _encolar_correo_activacion,
@@ -332,6 +331,74 @@ def activar_tenant(data, request):
     return tenant, admin
 
 
+def reenviar_activacion(tenant_id, request):
+    """RF-01 (cierre del flujo de alta): reemite el enlace de activacion del
+    administrador inicial.
+
+    Sin esta via, un enlace vencido (24 h) o perdido deja al entorno atrapado en
+    'pendiente' de forma permanente: RN08 mantiene la activacion fuera del login
+    (RF-16), y el restablecimiento de contrasena (RF-18) exige una cuenta ya
+    activa, asi que ningun otro camino puede rescatarlo. Es la unica accion
+    correctiva del SysAdmin sobre un alta a medias.
+
+    ROTA el token: emite uno nuevo y descarta el anterior en la misma escritura,
+    de modo que un enlace filtrado deja de servir en cuanto se reenvia. El token
+    en claro se devuelve una sola vez (en la tabla vive su hash), igual que en
+    RF-01, y se encola el correo para el worker de RF-25.
+
+    Devuelve (admin, token). El tenant no cambia de estado: sigue 'pendiente'
+    hasta que el administrador consuma el enlace.
+    """
+    tenant = _obtener_tenant(tenant_id)
+    if tenant.estado != "pendiente":
+        raise BusinessRuleError(
+            "El entorno ya fue activado; no hay enlace de activacion que reenviar.",
+            campo="estado",
+        )
+
+    # El administrador inicial es el unico usuario del tenant con el rol de
+    # sistema (TENANT_ADMIN) que crea crear_tenant. Se acota a 'pendiente' para
+    # no reescribirle el token a una cuenta que ya definio su contrasena.
+    admin = (
+        Usuario.objects.select_related("tenant")
+        .filter(
+            tenant=tenant,
+            estado="pendiente",
+            core_usuario_rol_usuario_set__rol__es_sistema=True,
+        )
+        .order_by("created_at")
+        .first()
+    )
+    if admin is None:
+        raise BusinessRuleError(
+            "El entorno no tiene un administrador inicial pendiente de activacion.",
+            campo="estado",
+        )
+
+    token, token_hash = _nuevo_token_activacion()
+    now = timezone.now()
+
+    with sysadmin_context(request):
+        request._sysadmin_tenant_id = tenant.id
+        admin.token_activacion = token_hash
+        admin.token_activacion_exp = now + ACTIVACION_VIGENCIA
+        admin.updated_at = now
+        admin.save(
+            update_fields=["token_activacion", "token_activacion_exp", "updated_at"]
+        )
+        _encolar_correo_activacion(admin, token, now)
+
+        _evento_plataforma(
+            request, "TENANT_REENVIO_ACTIVACION", "usuario", admin.id,
+            tenant_id=tenant.id,
+            valores={"sysadmin_id": request.sysadmin_id, "correo": admin.correo,
+                     "expira_en": admin.token_activacion_exp.isoformat()},
+            criticidad="ALTA",
+        )
+
+    return admin, token
+
+
 # ------------------------------------------------------------------- RF-02
 
 def listar_tenants(request):
@@ -408,20 +475,6 @@ def _obtener_tenant(tenant_id):
         return Tenant.objects.select_related("plan").get(id=tenant_id)
     except (ValidationError, ValueError):
         raise Tenant.DoesNotExist
-
-
-def _mapa_dependencias():
-    """codigo_modulo -> {codigos de los que depende} y su inverso (quien depende
-    de cada modulo). Ambos por codigo, ya resueltos desde core.modulo."""
-    deps, inverso = {}, {}
-    filas = (
-        ModuloDependencia.objects.select_related("modulo", "depende_de")
-        .values_list("modulo__codigo", "depende_de__codigo")
-    )
-    for mod, dep in filas:
-        deps.setdefault(mod, set()).add(dep)
-        inverso.setdefault(dep, set()).add(mod)
-    return deps, inverso
 
 
 def editar_tenant(tenant_id, data, request):
@@ -533,7 +586,7 @@ def _resolver_modulos(tenant, activar, desactivar, confirmar_cascada):
         )
 
     # RN03: el nucleo (fase 0) nunca se desactiva.
-    nucleo = {c for c in desactivar if catalogo[c].fase == 0}
+    nucleo = {c for c in desactivar if catalogo[c].fase == catalogo_service.NUCLEO_FASE}
     if nucleo:
         raise BusinessRuleError(
             "El modulo de Identidad y Usuarios (nucleo) no puede desactivarse.",
@@ -555,7 +608,7 @@ def _resolver_modulos(tenant, activar, desactivar, confirmar_cascada):
     activos = set(
         TenantModulo.objects.filter(tenant=tenant, activo=True).values_list("modulo__codigo", flat=True)
     )
-    deps, inverso = _mapa_dependencias()
+    deps, inverso = catalogo_service.mapa_dependencias()
 
     # RN07/CA09: desactivar en cascada. Cierre transitivo de dependientes activos.
     if desactivar:

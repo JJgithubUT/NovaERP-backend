@@ -166,11 +166,14 @@ Alta de organización → activación en cascada, edición de datos/plan/módulo
 dependencias entre módulos), suspensión/baja/reactivación.
 | Acción | Endpoint |
 |---|---|
+| Contexto de la sesión de plataforma | `GET /api/admin/me/` |
+| Catálogo (planes, módulos, dependencias) | `GET /api/admin/catalogos/` |
 | Registrar tenant | `POST /api/admin/tenants/` |
 | Listar / detalle | `GET /api/admin/tenants/[{id}/]` |
 | Editar (datos, plan, módulos) | `PATCH /api/admin/tenants/{id}/` |
 | Suspender / baja / reactivar | `POST /api/admin/tenants/{id}/suspender/` · `.../reactivar/` |
 | Activar (público, lo hace el admin inicial) | `POST /api/auth/activar-tenant/` |
+| Reemitir el enlace de activación | `POST /api/admin/tenants/{id}/reenviar-activacion/` |
 
 ### 5.4 Ventas / CRM
 La cadena comercial. **Estados y reglas detalladas en `GUIA-FRONTEND.md` §9 y en OpenAPI.**

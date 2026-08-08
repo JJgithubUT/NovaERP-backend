@@ -1483,6 +1483,92 @@ paths:
       responses:
         "200": { description: Sesión cerrada. }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/me/:
+    get:
+      tags: [Plataforma — Tenants (SysAdmin)]
+      summary: Contexto del SysAdmin autenticado
+      description: >
+        Equivalente de `/api/core/me/` para el portal de plataforma. El shell lo
+        llama al arrancar para validar un token restaurado del storage: `200` = la
+        sesión sigue viva, `401` = volver al login. No devuelve roles ni permisos
+        (el SysAdmin es superusuario plano sobre `/api/admin/`) ni secretos.
+      responses:
+        "200":
+          description: Identidad y sesión en curso.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  correo: { type: string, format: email }
+                  activo: { type: boolean }
+                  created_at: { type: string, format: date-time }
+                  mfa_enrolado: { type: boolean, description: Reservado; hoy el login de plataforma es de una fase. }
+                  sesion:
+                    type: object
+                    nullable: true
+                    properties:
+                      jti: { type: string }
+                      emitida_en: { type: string, format: date-time }
+                      expira_en: { type: string, format: date-time }
+                      ip_origen: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/admin/catalogos/:
+    get:
+      tags: [Plataforma — Tenants (SysAdmin)]
+      summary: Catálogo maestro de plataforma (planes, módulos, dependencias)
+      description: >
+        Todo lo que necesitan el alta de tenant (RF-01) y el editor de módulos
+        (RF-03) para pintarse sin replicar el seed en el frontend. **Solo
+        lectura**: planes y módulos son tablas de semilla, se administran por SQL.
+
+
+        Devuelve *todos* los planes, incluidos los `activo: false` (un tenant puede
+        seguir contratado en un plan retirado y el detalle debe poder nombrarlo);
+        el selector de alta debe filtrar por `activo`, que es lo que valida el
+        `POST /api/admin/tenants/`.
+
+
+        Un módulo con `planes: []` no está en ningún plan y por tanto no puede
+        activarse en ningún tenant — hoy, toda la fase 2 (fuera de alcance).
+        `depende_de` / `requerido_por` son el mismo grafo con el que el backend
+        valida la cascada, así que la anticipación del FE coincide con el 422.
+      responses:
+        "200":
+          description: Catálogo completo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  planes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        codigo: { type: string, example: BUSINESS }
+                        nombre: { type: string }
+                        licencias_max: { type: integer }
+                        activo: { type: boolean, description: Solo los vigentes pueden contratarse. }
+                        modulos: { type: array, items: { type: string }, description: Códigos de módulo incluidos en el plan. }
+                  modulos:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        codigo: { type: string, example: VENTAS }
+                        nombre: { type: string }
+                        fase: { type: integer, description: "0 = núcleo, 1 = en alcance, 2 = fuera de alcance" }
+                        nucleo: { type: boolean, description: "fase 0: nunca se puede desactivar (422)" }
+                        depende_de: { type: array, items: { type: string } }
+                        requerido_por: { type: array, items: { type: string }, description: Se apagarían en cascada al desactivar este módulo. }
+                        planes: { type: array, items: { type: string }, description: Planes que lo incluyen; vacío = no contratable. }
+                  dominios_reservados:
+                    type: array
+                    items: { type: string }
+                    description: Palabras que el `slug` de un tenant no puede tomar (RF-01/RN07/CA10).
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/auth/activar-tenant/:
     post:
       tags: [Plataforma — Tenants (SysAdmin)]
@@ -1620,6 +1706,43 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/BusinessError" }
+  /api/admin/tenants/{id}/reenviar-activacion/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Plataforma — Tenants (SysAdmin)]
+      summary: Reemitir el enlace de activación del administrador inicial
+      description: >
+        Única acción correctiva sobre un alta a medias: el enlace de RF-01 vive
+        24 h y es de un solo uso, y sin esta vía un token vencido o perdido deja
+        al entorno atrapado en `pendiente` para siempre (la activación está fuera
+        del login por RN08, y RF-18 exige una cuenta ya activa).
+
+
+        **Rota el token**: el anterior deja de servir en cuanto se reenvía. El
+        nuevo se devuelve en claro una sola vez (en la tabla vive su hash) y se
+        encola el correo al administrador. El tenant sigue `pendiente`.
+      responses:
+        "200":
+          description: Enlace reemitido.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activacion_token: { type: string, description: En claro, solo en esta respuesta. }
+                  expira_en: { type: string, format: date-time, description: 24 h desde ahora. }
+                  admin_inicial:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      correo: { type: string, format: email }
+                      nombre_completo: { type: string }
+                      estado: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: El tenant ya no está `pendiente` (ya fue activado) o no tiene un administrador inicial pendiente.
+          content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
 
   # ═════════════════════════════════════════ Compras
   /api/compras/proveedores/:

@@ -5,11 +5,12 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from core.models import Tenant
+from core.models import Sysadmin, Tenant
+from core.services import catalogo_service
 from core.services import sysadmin_auth_service
 from core.services import tenant_service
 from core.services.sysadmin_auth_service import SysAdminLoginError
-from core.utils.auth import SysAdminRequiredMixin
+from core.utils.auth import UNAUTHORIZED, SysAdminRequiredMixin
 from core.utils.errors import BusinessRuleError
 
 # Portal de plataforma (SysAdmin). Superficie separada de la de tenant: sus
@@ -53,6 +54,31 @@ class SysAdminLogoutView(SysAdminRequiredMixin, View):
     def post(self, request):
         sysadmin_auth_service.logout(request, request.session_jti, request.sysadmin_id)
         return JsonResponse({"detail": "Sesion cerrada."})
+
+
+class SysAdminMeView(SysAdminRequiredMixin, View):
+    """Contexto del SysAdmin autenticado. El portal lo usa para rehidratar su
+    shell al recargar: si responde 200 el token guardado sigue vivo, y si
+    responde 401 hay que volver al login. Sin secretos."""
+
+    def get(self, request):
+        try:
+            return JsonResponse(sysadmin_auth_service.contexto(request))
+        except Sysadmin.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+
+class CatalogosView(SysAdminRequiredMixin, View):
+    """Catalogo maestro de plataforma (planes, modulos, dependencias y dominios
+    reservados) que necesitan el alta de tenant (RF-01) y el editor de modulos
+    (RF-03). Solo lectura: son tablas de semilla, no se administran por API.
+
+    Existe para que el portal no tenga que replicar el seed: la respuesta trae
+    el mismo grafo de dependencias con el que _resolver_modulos valida, de modo
+    que lo que el frontend anticipe coincida con lo que el backend aplica."""
+
+    def get(self, request):
+        return JsonResponse(catalogo_service.catalogos())
 
 
 # ------------------------------------------------------------ RF-01 / RF-02
@@ -151,6 +177,32 @@ class TenantReactivarView(SysAdminRequiredMixin, View):
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
         return JsonResponse(tenant_service.serialize_tenant(tenant, detalle=False))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class TenantReenviarActivacionView(SysAdminRequiredMixin, View):
+    """RF-01: reemite el enlace de activacion del administrador inicial de un
+    tenant que sigue 'pendiente'. Rota el token (el anterior deja de servir) y
+    devuelve el nuevo en claro por unica vez."""
+
+    def post(self, request, pk):
+        try:
+            admin, token = tenant_service.reenviar_activacion(pk, request)
+        except Tenant.DoesNotExist:
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+
+        return JsonResponse({
+            "activacion_token": token,
+            "expira_en": admin.token_activacion_exp.isoformat(),
+            "admin_inicial": {
+                "id": str(admin.id),
+                "correo": admin.correo,
+                "nombre_completo": admin.nombre_completo,
+                "estado": admin.estado,
+            },
+        })
 
 
 @method_decorator(csrf_exempt, name="dispatch")

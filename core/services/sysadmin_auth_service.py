@@ -2,7 +2,7 @@ from django.utils import timezone
 
 from django.db import connection
 
-from core.models import LogAuditoria
+from core.models import LogAuditoria, SesionSysadmin, Sysadmin
 from core.services import sysadmin_session_service
 from core.utils.audit import client_ip, sysadmin_context
 
@@ -89,6 +89,38 @@ def autenticar(request, correo, password):
     if error is not None:
         raise SysAdminLoginError(error)
     return token, mensaje_ok
+
+
+def contexto(request):
+    """Identidad y sesion en curso del SysAdmin autenticado. Es el equivalente
+    de /api/core/me/ (RF-09) para el portal de plataforma: el shell lo llama al
+    arrancar para validar un token restaurado del storage y saber quien opera,
+    en vez de deducirlo de que el listado de tenants no haya dado 401.
+
+    No expone password_hash ni mfa_secret (mismo criterio de RF-09/CA02).
+    Tampoco hay roles ni permisos que devolver: el SysAdmin es superusuario
+    plano sobre /api/admin/ y no pasa por PermissionResolver.
+
+    Lanza Sysadmin.DoesNotExist si la cuenta ya no existe; la vista lo traduce a
+    401 (sesion obsoleta), igual que MeView con un usuario borrado.
+    """
+    sysadmin = Sysadmin.objects.get(id=request.sysadmin_id)
+    sesion = SesionSysadmin.objects.filter(jwt_id=request.session_jti).first()
+
+    return {
+        "id": str(sysadmin.id),
+        "correo": sysadmin.correo,
+        "activo": sysadmin.activo,
+        "created_at": sysadmin.created_at.isoformat(),
+        "mfa_enrolado": bool(sysadmin.mfa_secret),
+        "sesion": None if sesion is None else {
+            "jti": sesion.jwt_id,
+            "emitida_en": sesion.emitida_en.isoformat(),
+            # El portal puede avisar del vencimiento sin decodificar el JWT.
+            "expira_en": sesion.expira_en.isoformat(),
+            "ip_origen": sesion.ip_origen,
+        },
+    }
 
 
 def logout(request, jti, sysadmin_id):

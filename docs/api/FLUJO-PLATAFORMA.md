@@ -19,6 +19,45 @@ normalmente un frontend distinto (consola interna).
   da `401`, y viceversa.
 - El SysAdmin **no pertenece a ningún tenant**: no pasa por el RBAC de tenant; es superusuario
   sobre la gestión de organizaciones.
+- **`GET /api/admin/me/`** devuelve la identidad y la sesión en curso. Es lo que el shell debe
+  llamar al arrancar para saber si un token guardado sigue vivo (`200`) o hay que volver al
+  login (`401`), en vez de deducirlo de que otra llamada falle.
+- Desactivar una cuenta (`sysadmin.activo = false`) **invalida sus sesiones ya emitidas** en la
+  siguiente petición, no solo sus logins futuros.
+
+---
+
+## 1.b El catálogo: `GET /api/admin/catalogos/`
+
+Una sola llamada con todo lo que los formularios necesitan. **No repliques el seed en el
+frontend**: planes y módulos se administran por SQL y este endpoint es su única lectura.
+
+```jsonc
+{
+  "planes": [
+    { "codigo": "STARTER", "nombre": "Starter", "licencias_max": 10, "activo": true,
+      "modulos": ["AUDITORIA", "AUTH", "INVENTARIO", "…"] }
+  ],
+  "modulos": [
+    { "codigo": "VENTAS", "nombre": "Ventas / CRM", "fase": 1, "nucleo": false,
+      "depende_de": ["INVENTARIO"], "requerido_por": [], "planes": ["BUSINESS", "ENTERPRISE"] }
+  ],
+  "dominios_reservados": ["admin", "api", "www", "…"]
+}
+```
+
+Cómo leerlo:
+
+| Campo | Para qué sirve en la UI |
+|---|---|
+| `planes[].activo` | El selector de alta **solo** debe ofrecer los `true`; el detalle usa el resto para nombrar planes retirados. |
+| `modulos[].nucleo` | Checkbox bloqueado: desactivarlo da `422` (RN03). |
+| `modulos[].planes` | Vacío = no está en ningún plan (hoy, toda la fase 2). Si no incluye el plan del tenant, checkbox deshabilitado con su razón. |
+| `depende_de` / `requerido_por` | El mismo grafo con el que el backend valida: permite anticipar la cascada y mostrar por qué. |
+| `dominios_reservados` | Validar el `slug` antes de enviar el alta (RN07/CA10). |
+
+El servidor sigue siendo la autoridad: cada regla que el FE anticipe se revalida y responde
+`422` con el `campo` en conflicto.
 
 ---
 
@@ -58,8 +97,24 @@ sequenceDiagram
 - **`slug`** es el “dominio” de la organización: `[a-z0-9-]`, 3–50, único en toda la
   plataforma y no puede ser una palabra reservada (→ `422`).
 - **`correo`** del admin inicial debe ser único en toda la plataforma.
-- **`plan`** (`STARTER`/`BUSINESS`/`ENTERPRISE`) determina qué módulos se activan.
+- **`plan`** determina qué módulos se activan. Los códigos vigentes salen de
+  `GET /api/admin/catalogos/`, no de una lista fija en el FE.
 - La **activación la hace el admin inicial** (no el SysAdmin), por el endpoint público.
+
+### Si el enlace se vence o se pierde
+
+```
+POST /api/admin/tenants/{id}/reenviar-activacion/   → {activacion_token, expira_en, admin_inicial}
+```
+
+Sin esto, un token vencido (24 h) deja al entorno **atrapado en `pendiente` para siempre**: la
+activación vive fuera del login (RN08) y el restablecimiento de contraseña (RF-18) exige una
+cuenta ya activa. Es la única acción correctiva sobre un alta a medias.
+
+- **Rota el token**: el anterior deja de funcionar de inmediato. Preséntalo con la misma
+  advertencia que el alta (se muestra una sola vez, vence en 24 h).
+- Solo aplica a tenants `pendiente`; sobre uno ya activo responde `422`.
+- El tenant **no** cambia de estado: sigue `pendiente` hasta que el admin consuma el enlace.
 
 ---
 
@@ -70,6 +125,12 @@ sequenceDiagram
 | Listar (`?estado= ?plan= ?search=`) | `GET /api/admin/tenants/` |
 | Detalle (módulos activos, licencias) | `GET /api/admin/tenants/{id}/` |
 | Editar datos / plan / módulos | `PATCH /api/admin/tenants/{id}/` |
+
+**Bajar de plan no reordena lo que ya existe** (RN02/RN04: no se borran datos ni usuarios).
+Tras un downgrade, un tenant puede quedar con **módulos activos fuera de su plan nuevo** y con
+**más usuarios que licencias** — solo se bloquea crear el siguiente. El detalle refleja ese
+estado tal cual, así que la UI debe poder pintarlo como advertencia en vez de asumir que es
+imposible.
 
 **Edición de módulos** (`PATCH` con `{modulos: {activar:[], desactivar:[]}}`):
 - El **núcleo** (identidad, usuarios, RBAC…) **no** se puede desactivar (→ `422`).
@@ -98,8 +159,11 @@ POST /api/admin/tenants/{id}/reactivar/                             → activo
 ## 6. Reglas que el FE (consola) debe reflejar
 
 - **Dos frontends, dos sesiones.** No mezcles el token de SysAdmin con el de tenant.
+- **Nada de espejos del seed.** Planes, módulos y dependencias salen de
+  `GET /api/admin/catalogos/`; una lista fija en el FE se desfasa en silencio.
 - **La activación no la hace el SysAdmin.** Tras crear el tenant, entrega/rastrea el
-  `activacion_token`; el admin inicial la completa desde la app de tenant.
+  `activacion_token`; el admin inicial la completa desde la app de tenant. Si se vence, hay
+  `reenviar-activacion/` — ofrécelo desde el detalle de cualquier tenant `pendiente`.
 - **Validaciones de alta:** anticipa en el formulario el formato del `slug`, las palabras
   reservadas y la unicidad de correo/dominio; maneja los `422` con el `campo` en conflicto.
 - **Cascada de módulos:** si un `PATCH` de módulos responde con `requiere_confirmar_cascada`,

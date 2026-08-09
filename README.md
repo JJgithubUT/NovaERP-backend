@@ -137,8 +137,22 @@ DEFAULT_FROM_EMAIL=no-reply@tudominio.com
 USE_X_FORWARDED_FOR=False
 ```
 
+La lista completa de variables, con sus valores por defecto y para qué sirve
+cada una, está comentada en [`.env.example`](.env.example).
+
 > **`SECRET_KEY`**: firma los JWT. Si la cambias, invalidas todas las sesiones
-> emitidas. Usa una clave larga y secreta en cualquier entorno real.
+> emitidas. Usa una clave larga y secreta en cualquier entorno real:
+>
+> ```bash
+> python -c "import secrets; print(secrets.token_urlsafe(64))"
+> ```
+
+> **Los valores por defecto son los de producción.** Lo que no declares se
+> comporta como en un despliegue: `DEBUG` apagado, sin `SECRET_KEY` inventada y
+> sin `ALLOWED_HOSTS` permisivos. Para desarrollo hay que poner `DEBUG=True`
+> explícitamente. Si falta algo indispensable con `DEBUG=False`, el proyecto **no
+> arranca** y dice exactamente qué variable falta, en vez de servir una
+> instalación insegura en silencio.
 
 ---
 
@@ -246,6 +260,12 @@ python manage.py enviar_notificaciones
 - Para entrega real: configura SMTP en `.env` (paso 5) y programa el worker con
   un scheduler (cron en Linux, Task Scheduler en Windows), p. ej. cada minuto.
 
+> **Guía completa: [`docs/DESPLIEGUE-CORREO.md`](docs/DESPLIEGUE-CORREO.md)** —
+> configuración por proveedor (Gmail, SendGrid, Mailgun, SES, Microsoft 365),
+> cómo probar el SMTP antes de depender de él, cómo programar el worker en cada
+> sistema, cómo leer y reencolar la cola, entregabilidad (SPF/DKIM/DMARC) y
+> diagnóstico.
+
 > Nota: el alta de tenant (RF-01) y de usuario (RF-05) devuelven el token de
 > activación en la respuesta del API (conveniencia de desarrollo), así que
 > **puedes activar sin correo**. El restablecimiento de contraseña (RF-18) sí
@@ -261,11 +281,23 @@ python manage.py enviar_notificaciones
   aplicación sin ese privilegio (las extensiones y el esquema los instala un
   superusuario aparte). La app publica `app.current_tenant_id` / `app.is_sysadmin`
   en cada transacción para que las políticas de RLS entren en efecto.
-- **`DEBUG=False`** y un `SECRET_KEY` fuerte y secreto.
-- **`ALLOWED_HOSTS`** con tu dominio real.
+- **`DEBUG=False`** y un `SECRET_KEY` fuerte y secreto (mínimo 50 caracteres; el
+  arranque lo verifica).
+- **`ALLOWED_HOSTS`** y **`CORS_ALLOWED_ORIGINS`** con tus dominios reales. Ambos
+  son obligatorios con `DEBUG=False`.
 - **TLS 1.2+** delante (reverse proxy); activa `USE_X_FORWARDED_FOR=True` solo si
-  ese proxy reescribe la cabecera.
-- Programa el worker de notificaciones y configura un **SMTP** real.
+  ese proxy reescribe la cabecera. Eso también habilita la detección de HTTPS
+  (`SECURE_PROXY_SSL_HEADER`), sin la cual la redirección a https entra en bucle.
+- **HSTS por etapas**: `SECURE_HSTS_SECONDS` empieza en `0`. Súbelo (3600 →
+  86400 → 31536000) solo cuando el certificado esté estable — con HTTPS roto, un
+  valor alto deja el dominio inaccesible durante todo ese tiempo.
+- Programa el worker de notificaciones y configura un **SMTP** real:
+  [`docs/DESPLIEGUE-CORREO.md`](docs/DESPLIEGUE-CORREO.md).
+- Valida la configuración antes de publicar:
+
+  ```bash
+  python manage.py check --deploy
+  ```
 
 ---
 

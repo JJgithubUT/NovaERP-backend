@@ -7,7 +7,9 @@ procedimiento paso a paso y la verificación posterior.
 > Documentos hermanos:
 > [`README.md`](../README.md) (instalación y desarrollo) ·
 > [`.env.example`](../.env.example) (todas las variables) ·
-> [`docs/DESPLIEGUE-CORREO.md`](DESPLIEGUE-CORREO.md) (SMTP y worker de correo).
+> [`docs/DESPLIEGUE-CORREO.md`](DESPLIEGUE-CORREO.md) (SMTP y worker de correo) ·
+> [`novaerp-mobile/DESPLIEGUE-MOVIL.md`](../../novaerp-mobile/DESPLIEGUE-MOVIL.md)
+> (la app Flutter; **§8 de esta guía** cubre cómo empatar ambos despliegues).
 
 ---
 
@@ -40,6 +42,7 @@ empaquetado sin las cuales el despliegue no arranca en un servidor Linux.
 | **B1** | `requirements.txt` incluye `pywin32==312` | **`pip install -r requirements.txt` falla en Linux.** No existe distribución para esa plataforma. El despliegue se detiene aquí. |
 | **B2** | No hay servidor WSGI de producción | `runserver` **no** debe usarse en producción (un solo hilo, sin límites, sin manejo de carga). No hay `gunicorn` ni `waitress` en las dependencias. |
 | **B3** | `requirements.txt` mezcla herramientas de desarrollo | `repomix`, `mcp`, `tree-sitter*`, `detect-secrets`, `tiktoken`, `prompt_toolkit`, `questionary`, `pyperclip` y sus dependencias no los usa la aplicación. Son ~30 paquetes de superficie de ataque y peso innecesarios en el servidor. |
+| **B4** | `SECRET_KEY` no se puede rotar sin bloquear a todos los usuarios | La clave cifra los `mfa_secret`, y el login no maneja un secreto ilegible: bloqueo permanente. El único mecanismo de emergencia ante una filtración hoy no es ejecutable. **Detalle y mitigación en §7.1** |
 
 ### Lo que falta — recomendable (no bloquea)
 
@@ -47,9 +50,11 @@ empaquetado sin las cuales el despliegue no arranca en un servidor Linux.
 |---|---|---|
 | R1 | No hay endpoint de salud (`/health`) | El balanceador, el monitor y el orquestador necesitan un chequeo barato para saber si la instancia está viva |
 | R2 | No hay `Dockerfile` / unidad `systemd` / config de nginx | El procedimiento queda manual; §4 lo cubre con plantillas |
-| R3 | `tests.py` son plantillas vacías en las 10 apps | No hay puerta automática antes de publicar; la verificación es manual (§6) |
+| R3 | `tests.py` son plantillas vacías en las 10 apps | No hay puerta automática antes de publicar. La app móvil sí trae suite (`flutter test`, 27 pruebas, más `backend_e2e_test.dart` contra un backend real): úsela como verificación de integración |
+| R4 | Cadena de timeouts no monótona con la app móvil | La app se rinde a los 20 s y la base sigue hasta 30 s: errores fantasma y **riesgo de duplicar movimientos de inventario** al reintentar. Se corrige con una variable del `.env` — **§8.3** |
 
-**Resuelva B1–B3 (§1) y el backend queda desplegable.**
+**Resuelva B1–B3 (§1) y el backend queda desplegable.** B4 no impide publicar,
+pero deje resuelto el plan de §7.1 antes de que haga falta.
 
 ---
 
@@ -468,19 +473,36 @@ pida un recurso del tenant B: debe responder 404/403, **nunca** el dato.
 
 ### 6.4 Autenticación y sesión
 
+El login es de **dos fases** (RF-16): la contraseña no devuelve un token, sino
+un reto de segundo factor. Los campos son `tenant_slug`, `correo` y `password`
+— no `email`, y `tenant_slug` es obligatorio.
+
 ```bash
+# Fase 1 — devuelve {"reto":"…","mfa":"otp"|"enroll"}, NO un token
 curl -sS -X POST https://api.suempresa.com/api/auth/login/ \
   -H 'Content-Type: application/json' \
-  -d '{"email":"...","password":"..."}'
+  -d '{"tenant_slug":"suempresa","correo":"admin@suempresa.com","password":"..."}'
+
+# Fase 2 — canjea el reto por el token de sesión
+curl -sS -X POST https://api.suempresa.com/api/auth/otp/ \
+  -H 'Content-Type: application/json' \
+  -d '{"reto":"<el reto de la fase 1>","codigo":"123456"}'
+
+# Contexto del usuario autenticado
+curl -sS https://api.suempresa.com/api/core/me/ -H 'Authorization: Bearer <token>'
 ```
 
-- Token válido → `GET /api/core/me/` con `Authorization: Bearer <token>`
-  responde 200.
+En el primer acceso de un usuario, la fase 1 responde `mfa: "enroll"` e incluye
+`secret` y `otpauth_uri` **una sola vez**.
+
 - Tras `POST /api/auth/logout/`, el **mismo token** debe dar 401: la sesión se
   valida contra la fila persistida, no solo contra la firma del JWT.
 - El portal de plataforma es una superficie distinta:
   `POST /api/admin/login/` → `GET /api/admin/me/`. Un token de tenant **no**
   debe servir en `/api/admin/`, ni al revés.
+
+> Una prueba de humo que envíe `{"email":…,"password":…}` recibe un 400 y, si
+> solo se comprueba «respondió algo», daría por bueno un despliegue roto.
 
 ### 6.5 Correo
 
@@ -504,6 +526,10 @@ Desde el navegador, en el origen real del frontend. Un `CORS_ALLOWED_ORIGINS`
 con barra final o con el esquema equivocado es el fallo más frecuente: un origen
 es **esquema + host + puerto**, sin ruta ni `/` al final.
 
+> Esta prueba **solo aplica al frontend web**. La app móvil es un cliente
+> nativo, no envía `Origin` y CORS no la afecta — verificarla desde el móvil no
+> demuestra nada. Ver §8.2.
+
 ---
 
 ## 7. Operación
@@ -512,9 +538,49 @@ es **esquema + host + puerto**, sin ruta ni `/` al final.
 |---|---|
 | **Logs** | `journalctl -u novaerp.service -f`. Un 500 aparece bajo el logger `django.request` |
 | **Respaldos** | `pg_dump -Fc novaerp > novaerp_$(date +%F).dump` diario. **Pruebe la restauración**: un respaldo no verificado no es un respaldo |
-| **Rotar `SECRET_KEY`** | Botón de pánico ante filtración. Invalida **todas** las sesiones vivas de tenants y de plataforma — todo el mundo vuelve a autenticarse. Cambie el `.env` y reinicie |
+| **Rotar `SECRET_KEY`** | ⚠️ **No la rote sin leer §7.1.** No solo cierra sesiones: deja a todos los usuarios sin poder autenticarse **de forma permanente** |
 | **Bitácora (RF-20)** | `core.log_auditoria` es la fuente legal de eventos, independiente de los logs de operación. Inclúyala en los respaldos y no la purgue sin política escrita |
 | **Actualizar el esquema** | Los nuevos `.sql` de `sql/` se aplican con el rol **superusuario**, no con `novaerp_app` (no tiene DDL a propósito) |
+
+### 7.1 Rotar `SECRET_KEY` bloquea el sistema — leer antes de tocarla
+
+`SECRET_KEY` no solo firma los JWT. [`core/utils/secretos.py`](../core/utils/secretos.py)
+deriva de ella —por SHA-256— la clave Fernet con la que se cifra el `mfa_secret`
+de cada usuario. Al rotarla, esos secretos dejan de descifrarse.
+
+El diseño preveía degradar con elegancia: el docstring de `descifrar()` dice que
+un secreto ilegible se trate como «sin secreto» y fuerce re-enrolamiento.
+**Eso nunca se cableó.** `auth_service.autenticar()` decide la rama mirando el
+campo crudo, no el valor descifrado:
+
+```python
+# core/services/auth_service.py:148
+if usuario.mfa_secret is None or not usuario.mfa_enrolado:
+```
+
+Con un secreto **presente pero ilegible**, el login se va por la rama OTP;
+`validar_otp` lo descifra a `None` (línea 214), ningún código puede validar
+jamás, y **cada intento suma al contador de bloqueo**. Si el único
+`TENANT_ADMIN` activo cae en ese estado, no queda nadie que pueda resetear el
+MFA: el tenant muere.
+
+**Mientras no se corrija:**
+
+- No rote `SECRET_KEY` sin un plan de reseteo masivo de MFA.
+- No copie datos entre entornos: los `mfa_secret` de desarrollo no se descifran
+  con la clave de producción.
+- Si tiene que rotarla, en la **misma** ventana de mantenimiento:
+
+  ```sql
+  UPDATE core.usuario SET mfa_secret = NULL, mfa_enrolado = FALSE;
+  ```
+
+  Todos re-enrolan en su siguiente acceso: molesto, pero recuperable.
+
+La corrección de fondo es que `autenticar()` decida la rama según si el secreto
+es *utilizable*, no según si es `NULL`. **Recomendado hacerlo antes de
+publicar**: convierte el único mecanismo de emergencia ante una filtración
+(rotar la clave) en una operación que hoy no se puede ejecutar.
 
 ### Procedimiento de actualización
 
@@ -533,7 +599,136 @@ Django, así que tampoco hay reversión automática.
 
 ---
 
-## 8. Resumen
+## 8. Empatar con la app móvil (Flutter)
+
+El frontend principal de este despliegue es una app **Flutter nativa**
+(`novaerp-mobile`), no una web. Su guía propia es
+[`DESPLIEGUE-MOVIL.md`](../../novaerp-mobile/DESPLIEGUE-MOVIL.md); aquí va solo
+lo que obliga a coordinar los dos lados.
+
+### 8.1 ¿Sirve este tipo de front? Sí
+
+| Verificación | Resultado |
+|---|---|
+| Paridad de endpoints | ✅ Los 17 endpoints de `lib/core/config/api_constants.dart` existen en el backend, con la misma ruta y barra final |
+| Contrato de login | ✅ La app implementa el login de dos fases (`/login/` → reto → `/otp/` → token) con `tenant_slug`/`correo`/`password` |
+| Transporte del token | ✅ `Authorization: Bearer` por interceptor de Dio — no cookies, así que no hay dependencia de sesión de Django |
+| Manejo del 401 | ✅ Central: el backend revoca del lado servidor (RF-17/RF-19) y la app cierra sesión al recibirlo |
+| Almacenamiento del token | ✅ Keychain / EncryptedSharedPreferences, no texto plano |
+| HTTPS | ✅ El tráfico en claro solo se permite en el build de depuración |
+
+Un cliente nativo encaja **mejor** que una SPA con la arquitectura del backend:
+la autenticación ya es por `Authorization` y sin estado de sesión Django.
+
+### 8.2 Lo que cambia respecto de un frontend web
+
+| Punto | Web | Móvil nativo |
+|---|---|---|
+| **CORS** | Obligatorio y crítico | **No aplica.** Un cliente nativo no envía `Origin`; `CORS_ALLOWED_ORIGINS` le es indiferente |
+| **Certificado TLS** | Un autofirmado se puede aceptar «una vez» | **Rechazo duro.** Debe ser de una CA pública (Let's Encrypt sirve) o hay que empaquetarlo en la app |
+| **`SECURE_SSL_REDIRECT`** | Relevante | Irrelevante: la app solo habla `https://` en release |
+| **Actualizar el cliente** | Instantáneo al desplegar | **Días.** Revisión de tienda + el usuario decide cuándo actualizar |
+| **Alta de un tenant nuevo** | Inmediata | Requiere **un build nuevo**: `TENANT_SLUG` se fija en compilación |
+
+⚠️ **Ojo con `CORS_ALLOWED_ORIGINS`**: `settings.py` la exige con `DEBUG=False`
+y **el backend no arranca sin ella** (§0). Si algún día el móvil fuera el único
+cliente, esa exigencia obligaría a inventar un valor ficticio. Hoy no es
+problema —hay frontend web, y `ACTIVACION_URL_BASE` apunta a él—, pero no ponga
+un origen falso «para que arranque»: liste el del frontend web real.
+
+### 8.3 Desajuste de tiempos de espera — corregir
+
+La cadena de timeouts **no es monótona**, y eso produce fallos que parecen
+aleatorios:
+
+| Capa | Valor actual |
+|---|---|
+| Dio `connectTimeout` | 15 s |
+| Dio `receiveTimeout` | **20 s** |
+| `statement_timeout` de PostgreSQL | **30 s** |
+| `--timeout` de gunicorn | 60 s |
+| `proxy_read_timeout` de nginx | 60 s |
+
+El cliente se rinde a los 20 s mientras el servidor sigue trabajando hasta 30 s.
+Consecuencias reales en los endpoints pesados (`kardex`, `valuacion`,
+`bitacora/export`, `reportes/actividad`):
+
+- El usuario ve un error de red aunque la operación **sí se completó**.
+- En los `POST` (`movimientos`, `ajustes`, `transferencias`) el usuario reintenta
+  y **duplica el movimiento de inventario**. No hay clave de idempotencia.
+
+Haga la cadena monótona — que cada capa se rinda antes que la de fuera:
+
+```
+statement_timeout (15 s)  <  Dio receiveTimeout (20 s)  <  gunicorn (60 s)  <  nginx (60 s)
+```
+
+Lo más barato es bajar el `.env` del backend, sin tocar la app ni republicarla:
+
+```ini
+DB_STATEMENT_TIMEOUT_MS=15000
+```
+
+Así la base corta la consulta y el backend devuelve un 500 limpio y auditable
+**antes** de que la app abandone. Si algún reporte legítimamente tarda más de
+15 s, la solución no es subir el timeout: es paginarlo o volverlo asíncrono.
+
+### 8.4 Compatibilidad del API: la restricción de fondo
+
+Con un frontend web, «desplegar» actualiza a todos los clientes a la vez. Con
+una app nativa **no**: durante semanas habrá versiones viejas en la calle. El
+procedimiento de actualización de §7 asume lo primero.
+
+Regla a partir de ahora: **los cambios del API son aditivos.**
+
+- ✅ Añadir campos a una respuesta, añadir endpoints, añadir parámetros opcionales.
+- ❌ Renombrar o eliminar campos, volver obligatorio un parámetro que no lo era,
+  cambiar el tipo o el significado de un valor, mover una ruta.
+- Si un cambio rompe: publique la ruta nueva **junto a** la vieja, dé la app por
+  actualizada solo cuando la telemetría de la tienda lo confirme, y retire la
+  vieja después.
+
+Sin esto, un despliegue del backend deja inutilizables los teléfonos que aún no
+actualizaron, y no hay forma de revertirlo desde el servidor salvo redesplegando
+la versión anterior del API.
+
+### 8.5 Orden de publicación
+
+```mermaid
+flowchart TD
+    A["1 · Backend desplegado y verificado (§6)<br/>HTTPS con CA pública, ALLOWED_HOSTS con el dominio real"] --> B["2 · Tenant dado de alta<br/>su slug es el TENANT_SLUG del build"]
+    B --> C["3 · config/prod.json de la app<br/>API_BASE_URL = exactamente ese dominio"]
+    C --> D["4 · flutter test test/backend_e2e_test.dart<br/>contra PREPRODUCCIÓN, no producción"]
+    D --> E["5 · Build firmado con el .jks real<br/>NO la clave de depuración"]
+    E --> F["6 · Verificación en dispositivo<br/>login + MFA, permisos, inventario"]
+    F --> G["7 · Publicar en la tienda"]
+```
+
+Tres puntos donde el orden importa:
+
+1. **El backend va primero.** La app no arranca contra un backend que no existe,
+   y `API_BASE_URL` tiene que coincidir **exactamente** con un host de
+   `ALLOWED_HOSTS` o Django responde 400 con HTML antes de mirar la ruta.
+2. **El tenant antes del build.** `TENANT_SLUG` se compila; si el slug cambia
+   después, hay que recompilar y volver a pasar por tienda.
+3. **`test/backend_e2e_test.dart` escribe datos reales** — crea almacenes,
+   registra movimientos y da de alta usuarios. Contra producción, solo las
+   pruebas de consulta.
+
+### 8.6 Pendientes de la app que tocan al backend
+
+| Pendiente (móvil) | Qué lo resuelve del lado backend |
+|---|---|
+| Las alertas de stock devuelven UUID en crudo; la app pagina el catálogo para resolver nombres | Resolver los nombres en `serialize_alerta` |
+| La bitácora devuelve `usuario_id` en crudo | Igual, en el serializador de bitácora |
+| Falta firmar el release con el `.jks` real | — (es del lado móvil, pero **bloquea publicar**) |
+
+Ambos son cambios **aditivos** (§8.4): añadir el nombre junto al UUID no rompe a
+las versiones ya instaladas.
+
+---
+
+## 9. Resumen
 
 ```mermaid
 flowchart TD
@@ -547,11 +742,16 @@ flowchart TD
     H --> I["HSTS por etapas §5"]
 ```
 
-Los tres errores que más cuestan, por orden de frecuencia:
+Los errores que más cuestan, por orden de gravedad:
 
-1. **Olvidar el worker de correo** — la cola crece en silencio y nadie se entera
-   hasta que un usuario no puede restablecer su contraseña.
+1. **Rotar `SECRET_KEY` sin resetear el MFA** (§7.1) — bloqueo permanente de
+   todos los usuarios; si cae el único `TENANT_ADMIN`, el tenant es
+   irrecuperable.
 2. **Conectar la aplicación como `postgres`** — RLS se omite y el aislamiento
    entre tenants deja de existir, sin ningún síntoma visible.
-3. **`SECURE_SSL_REDIRECT=True` sin `X-Forwarded-Proto`** — bucle de
+3. **Olvidar el worker de correo** — la cola crece en silencio y nadie se entera
+   hasta que un usuario no puede restablecer su contraseña.
+4. **`SECURE_SSL_REDIRECT=True` sin `X-Forwarded-Proto`** — bucle de
    redirección, la API entera inaccesible.
+5. **Un cambio no aditivo del API** (§8.4) — deja inutilizables los teléfonos que
+   aún no actualizaron, y no se revierte desde el servidor.

@@ -2562,6 +2562,7 @@ components:
             id: { type: string, format: uuid }
             nombre_completo: { type: string }
             correo: { type: string }
+            telefono: { type: string, nullable: true }
             estado: { $ref: "#/components/schemas/EstadoUsuario" }
             mfa_enrolado: { type: boolean }
             ultimo_acceso: { type: string, format: date-time, nullable: true }

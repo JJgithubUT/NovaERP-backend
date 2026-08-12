@@ -505,6 +505,7 @@ class MeView(LoginRequiredMixin, View):
                     "id": str(usuario.id),
                     "nombre_completo": usuario.nombre_completo,
                     "correo": usuario.correo,
+                    "telefono": usuario.telefono,
                     "estado": usuario.estado,
                     "mfa_enrolado": usuario.mfa_enrolado,
                     "ultimo_acceso": ultimo_acceso.isoformat() if ultimo_acceso else None,

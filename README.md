@@ -73,13 +73,8 @@ $psql = "C:\Program Files\PostgreSQL\16\bin\psql.exe"
 $env:PGPASSWORD = "TU_PASSWORD_DE_POSTGRES"
 
 # 1) Esquema base + seed
-& $psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f final.sql
+& $psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f db.sql
 
-# 2) Migraciones incrementales, en orden de nombre
-Get-ChildItem sql\*.sql | Sort-Object Name | ForEach-Object {
-    Write-Host "Aplicando $($_.Name)"
-    & $psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f $_.FullName
-}
 ```
 
 En Linux/macOS (bash):
@@ -87,10 +82,6 @@ En Linux/macOS (bash):
 ```bash
 export PGPASSWORD="TU_PASSWORD_DE_POSTGRES"
 psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f db.sql
-for f in $(ls sql/*.sql | sort); do
-  echo "Aplicando $f"
-  psql -U postgres -h localhost -d novaerp -v ON_ERROR_STOP=1 -f "$f"
-done
 ```
 
 **Qué queda instalado** (verificable): 63+ tablas en 10 esquemas, 37 triggers de

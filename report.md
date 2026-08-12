@@ -263,6 +263,27 @@ Todas idempotentes, aplicadas a la base de desarrollo y reflejadas en `db.sql`. 
 
 ---
 
+## 7bis. Extensión post-ERS — Reportes de Ventas (RV-01…06) · 2026-08-04
+
+Sprint **fuera del alcance ERS v3.0** (numeración propia para no colisionar con los RF): seis reportes agregados del dominio comercial. Plan y decisiones en [`docs/SPRINT-REPORTES-VENTAS.md`](docs/SPRINT-REPORTES-VENTAS.md); contrato para el frontend en [`docs/api/FLUJO-VENTAS-REPORTES.md`](docs/api/FLUJO-VENTAS-REPORTES.md).
+
+| RV | Reporte | Estado | Verif. | Nota |
+|---|---|---|---|---|
+| RV-01 | Ventas por periodo | ✅ Completo | 🧪 | Día/semana/mes. Venta neta = facturado − NC; la NC se imputa a **su** fecha, no a la de la factura, para no alterar un periodo ya reportado. |
+| RV-02 | Ranking de clientes | ✅ Completo | 🧪 | Los totales agregan todo el rango, no solo el top; participación `null` si la base no es positiva. |
+| RV-03 | Ranking de productos | ✅ Completo | 🧪 | **Importe bruto:** `nota_credito` no tiene líneas, así que las devoluciones no se pueden imputar a un producto. Declarado en la respuesta y en el archivo. |
+| RV-04 | Embudo comercial | ✅ Completo | 🧪 | Cuenta documentos creados en el rango (flujo del periodo), no una foto de estados; conversión respecto de la etapa anterior. |
+| RV-05 | Cartera por antigüedad | ✅ Completo *(desviación)* | 🧪 | Saldo reconstruido **a la fecha de corte** (monto − abonos previos), no el saldo vivo. **Desviación:** la antigüedad son días desde emisión, no vencidos — el esquema no modela `fecha_vencimiento` ni `dias_credito`. |
+| RV-06 | Desempeño de vendedores | ✅ Completo | 🧪 | Fila `Sin asignar` para el histórico sin atribución; nunca se reparte entre vendedores. |
+
+**Cambios de esquema** (`sql/2026-08-03_rv01_06_reportes_ventas.sql`, idempotente y aplicado en dev): `vendedor_id` en `cotizacion`/`pedido_venta`/`factura_venta` con backfill por la cadena existente; permisos `ventas:reportes:leer` y `:exportar`; 8 índices de soporte (esas tablas no tenían ninguno más allá de PK y unique de folio).
+
+**Código nuevo:** `core/utils/export.py` (CSV/PDF extraído de `auditoria_service`), `core/utils/errors.ParametroInvalido` (400), `ventas/services/reporte_service.py`, `ventas/services/atribucion.py`, y la vista base `ReporteView`.
+
+**Verificación:** suites contra PostgreSQL real, incluidas las dos que faltaban al cerrar RF-30–44 — **aislamiento por tenant** (segundo tenant `rv-test` sembrado con facturación propia: ninguno de los seis reportes la filtra) y **autorización real sin bypass** (usuarios `rv-ciego` y `rv-lector`: 403 sin permiso, 403 al exportar con solo `:leer`, y RN-04 comprobado — un vendedor sin `ventas:pipeline:ver_todo` no obtiene datos ajenos ni pidiendo `?vendedor_id=`).
+
+---
+
 ## 8. Lo que queda
 
 **El alcance RF-01–64 está completo (64/64).** No queda ningún RF pendiente ni bloqueado dentro del alcance.

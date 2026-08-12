@@ -64,15 +64,27 @@ def crear_sesion(request, sysadmin_id):
     return sesion, token
 
 
+def _viva(jti):
+    """Sesion vigente: existe, no revocada, no expirada Y su cuenta sigue
+    habilitada. Lo ultimo importa porque desactivar un SysAdmin (activo=False)
+    no revoca sus sesiones: sin este filtro, una cuenta dada de baja conservaria
+    acceso total al portal hasta que expirara su token (hasta 8 h). El validador
+    de login ya rechaza 'inactivo'; esto hace que las sesiones YA emitidas se
+    comporten igual. El JOIN no cuesta una consulta extra."""
+    return SesionSysadmin.objects.filter(
+        jwt_id=str(jti),
+        revocada_en__isnull=True,
+        expira_en__gt=timezone.now(),
+        sysadmin__activo=True,
+    )
+
+
 def sesion_valida(jti):
-    """Unica autoridad sobre si un JWT de SysAdmin sigue vigente. Verdadero solo
-    si la sesion existe, no esta revocada y no ha expirado. Sin efectos
+    """Unica autoridad sobre si un JWT de SysAdmin sigue vigente. Sin efectos
     secundarios (no revoca ni audita), como session_service.sesion_valida."""
     if not jti:
         return False
-    return SesionSysadmin.objects.filter(
-        jwt_id=str(jti), revocada_en__isnull=True, expira_en__gt=timezone.now()
-    ).exists()
+    return _viva(jti).exists()
 
 
 def sysadmin_id_de(jti):
@@ -81,13 +93,7 @@ def sysadmin_id_de(jti):
     reconfirma contra la fila de sesion vigente."""
     if not jti:
         return None
-    return (
-        SesionSysadmin.objects.filter(
-            jwt_id=str(jti), revocada_en__isnull=True, expira_en__gt=timezone.now()
-        )
-        .values_list("sysadmin_id", flat=True)
-        .first()
-    )
+    return _viva(jti).values_list("sysadmin_id", flat=True).first()
 
 
 def _activas(sysadmin_id):

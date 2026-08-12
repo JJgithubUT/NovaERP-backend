@@ -8,9 +8,11 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.pagination import paginate
-from core.utils.permissions import PermissionDeniedError, tiene_permiso
+from core.utils.permissions import PermissionDeniedError
 from ventas.models import Cliente, Oportunidad
+from ventas.services.atribucion import PERMISO_VER_TODO, ve_todo
 
 # Orden de las etapas (RF-32/RN01): solo se avanza a la SIGUIENTE, no se salta ni
 # se retrocede. 'ganada'/'perdida' son estados terminales (RF-33), no etapas.
@@ -25,9 +27,6 @@ PROB_POR_ETAPA = {
 # Catalogo de motivos de perdida (RF-33/RN01).
 MOTIVOS_PERDIDA = {"Precio", "Competencia", "Tiempo", "Presupuesto", "Sin respuesta", "Otro"}
 
-PERMISO_VER_TODO = "ventas:pipeline:ver_todo"
-
-
 def _probabilidad(op):
     if op.estado == "ganada":
         return 100
@@ -36,22 +35,16 @@ def _probabilidad(op):
     return PROB_POR_ETAPA.get(op.etapa, 0)
 
 
-def _ve_todo(request):
-    """RF-31: un vendedor solo ve/opera sus propias oportunidades salvo que tenga
-    ventas:pipeline:ver_todo (el bypass de TENANT_ADMIN ya lo satisface)."""
-    return tiene_permiso(request, PERMISO_VER_TODO)
-
-
 def _scope(qs, request):
-    """Acota a las oportunidades propias salvo permiso de ver todo."""
-    if _ve_todo(request):
+    """Acota a las oportunidades propias salvo permiso de ver todo (RF-31)."""
+    if ve_todo(request):
         return qs
     return qs.filter(responsable_id=request.usuario_id)
 
 
 def _exigir_operar(request, op):
     """Mutar una oportunidad ajena exige ver_todo (o ser admin)."""
-    if str(op.responsable_id) != str(request.usuario_id) and not _ve_todo(request):
+    if str(op.responsable_id) != str(request.usuario_id) and not ve_todo(request):
         raise PermissionDeniedError(PERMISO_VER_TODO, "Solo puede operar sus propias oportunidades.")
 
 
@@ -153,12 +146,12 @@ def listar_oportunidades(request):
     tenant = get_tenant(request)
     qs = _scope(Oportunidad.objects.filter(tenant=tenant), request)
 
-    for campo in ("cliente_id", "etapa", "estado", "responsable_id"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
+    for campo, val in filtros.filtros_validados(
+        Oportunidad, request, ("cliente_id", "etapa", "estado", "responsable_id")
+    ).items():
+        qs = qs.filter(**{campo: val})
 
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(fecha_cierre_estimada__gte=desde)
     if hasta:

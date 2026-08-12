@@ -7,8 +7,11 @@ from django.views.decorators.csrf import csrf_exempt
 
 from core.models import Tenant
 from core.utils.auth import UNAUTHORIZED
-from core.utils.errors import BusinessRuleError
-from core.utils.permissions import PermissionDeniedError, PermissionRequiredMixin
+from core.utils.errors import BusinessRuleError, ParametroInvalido
+from core.utils.export import formato_pedido
+from core.utils.permissions import (
+    PermissionDeniedError, PermissionRequiredMixin, exigir_permiso,
+)
 from core.utils.views import CatalogDetailView, CatalogListCreateView
 from ventas.models import Cliente, Cotizacion, FacturaVenta, Oportunidad, PedidoVenta
 from ventas.services import catalogo_service as svc
@@ -16,6 +19,7 @@ from ventas.services import cotizacion_service as cot_svc
 from ventas.services import factura_service as fac_svc
 from ventas.services import oportunidad_service as op_svc
 from ventas.services import pedido_service as ped_svc
+from ventas.services import reporte_service as rep_svc
 
 
 class ClienteListCreateView(CatalogListCreateView):
@@ -263,6 +267,8 @@ class PedidoListCreateView(PermissionRequiredMixin, View):
             return JsonResponse({"detail": "JSON invalido."}, status=400)
         try:
             p = ped_svc.crear_pedido(data, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
         except Tenant.DoesNotExist:
@@ -366,6 +372,8 @@ class FacturaListCreateView(PermissionRequiredMixin, View):
             return JsonResponse({"detail": "Pedido no encontrado."}, status=404)
         try:
             factura = fac_svc.generar_factura(pedido, data, request)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
         except BusinessRuleError as e:
             return JsonResponse(e.to_dict(), status=422)
         return JsonResponse(fac_svc.serialize_factura(factura), status=201)
@@ -383,6 +391,80 @@ class FacturaDetailView(PermissionRequiredMixin, View):
         except (FacturaVenta.DoesNotExist, Tenant.DoesNotExist):
             return JsonResponse({"detail": "No encontrado"}, status=404)
         return JsonResponse(fac_svc.serialize_factura(f))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ReporteView(PermissionRequiredMixin, View):
+    """Base de los reportes de ventas (RV-01..06).
+
+    Sin ?formato= devuelve el sobre JSON; con ?formato=csv|pdf devuelve el
+    archivo del reporte completo (mismos filtros, sin paginar). Exportar exige
+    un permiso ADICIONAL al de leer: saca datos del sistema, mismo criterio que
+    RF-24. Cada subclase solo declara sus dos funciones de servicio.
+    """
+
+    permiso_requerido = "ventas:reportes:leer"
+    permiso_exportar = "ventas:reportes:exportar"
+    reporte_fn = None
+    exportar_fn = None
+
+    def get(self, request):
+        try:
+            formato = formato_pedido(request)
+            if formato:
+                exigir_permiso(request, self.permiso_exportar)
+                return self.exportar_fn(request, formato)
+            return JsonResponse(self.reporte_fn(request))
+        except ParametroInvalido as e:
+            return JsonResponse(e.to_dict(), status=400)
+        except PermissionDeniedError as e:
+            return JsonResponse(e.to_dict(), status=403)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+        except Tenant.DoesNotExist:
+            return JsonResponse(UNAUTHORIZED, status=401)
+
+
+class ReporteVentasPeriodoView(ReporteView):
+    """RV-01: facturacion agregada por dia/semana/mes."""
+
+    reporte_fn = staticmethod(rep_svc.ventas_por_periodo)
+    exportar_fn = staticmethod(rep_svc.exportar_ventas_por_periodo)
+
+
+class ReporteClientesView(ReporteView):
+    """RV-02: ranking de clientes por venta neta o por numero de facturas."""
+
+    reporte_fn = staticmethod(rep_svc.ranking_clientes)
+    exportar_fn = staticmethod(rep_svc.exportar_ranking_clientes)
+
+
+class ReporteProductosView(ReporteView):
+    """RV-03: ranking de productos por importe o por cantidad."""
+
+    reporte_fn = staticmethod(rep_svc.ranking_productos)
+    exportar_fn = staticmethod(rep_svc.exportar_ranking_productos)
+
+
+class ReporteEmbudoView(ReporteView):
+    """RV-04: embudo comercial de oportunidad a factura."""
+
+    reporte_fn = staticmethod(rep_svc.embudo)
+    exportar_fn = staticmethod(rep_svc.exportar_embudo)
+
+
+class ReporteCarteraView(ReporteView):
+    """RV-05: antiguedad de saldos por cobrar a una fecha de corte."""
+
+    reporte_fn = staticmethod(rep_svc.cartera)
+    exportar_fn = staticmethod(rep_svc.exportar_cartera)
+
+
+class ReporteVendedoresView(ReporteView):
+    """RV-06: desempeno comercial por vendedor."""
+
+    reporte_fn = staticmethod(rep_svc.desempeno_vendedores)
+    exportar_fn = staticmethod(rep_svc.exportar_desempeno_vendedores)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

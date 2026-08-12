@@ -1,2026 +1,1147 @@
 ###########################################################
-# NovaERP Backend
-# REST Client (VS Code)
+# NovaERP Backend — colección de peticiones (curl)
+#
+# Cubre las 106 operaciones de docs/api/openapi.yaml, en el
+# mismo orden y con los mismos nombres de parámetro que el
+# contrato. Si algo aquí no coincide con el spec, el spec
+# manda: es la fuente de verdad.
+#
+# Cada bloque se copia y se pega tal cual. Las variables de
+# abajo son de shell (bash / Git Bash / PowerShell 7).
 ###########################################################
 
-@host = http://127.0.0.1:8000
-@tenant = acme
-@email = admin@acme.com
-@password = CambiarEnPrimerLogin!
+HOST=http://127.0.0.1:8000
+TENANT=acme
+EMAIL=admin@acme.com
+PASSWORD='CambiarEnPrimerLogin!'
+
+# Los ids se capturan de la respuesta anterior. Con jq:
+#   PRODUCTO_ID=$(curl -s ... | jq -r .id)
+# Sin jq, cópialos a mano de la respuesta:
+#   PRODUCTO_ID=9c339bd5-c794-4d4e-814d-240b58d7e673
 
 ###########################################################
-# LOGIN (RF-16) — DOS FASES: password -> reto OTP -> sesion
+# AUTENTICACIÓN — LOGIN EN DOS FASES (RF-16)
 ###########################################################
 
-# FASE 1: valida password. NO devuelve token de sesion; devuelve un reto.
-#   · mfa:"enroll" (primer login / admin sembrado) -> incluye "secret" y
-#     "otpauth_uri" una sola vez; configura tu autenticador con ese secreto.
+# Fase 1: valida la password. NO devuelve token de sesión, devuelve un "reto".
+#   · mfa:"enroll" (primer login) -> incluye "secret" y "otpauth_uri" UNA sola
+#     vez; configura tu app autenticadora con ese secreto.
 #   · mfa:"otp" (ya enrolado) -> solo el reto.
-POST {{host}}/api/auth/login/
-Content-Type: application/json
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"admin@acme.com","password":"CambiarEnPrimerLogin!"}'
 
-{
-  "tenant_slug": "{{tenant}}",
-  "correo": "{{email}}",
-  "password": "{{password}}"
-}
+# Fase 2: el reto + el código TOTP de 6 dígitos -> devuelve el token de sesión.
+curl -X POST $HOST/api/auth/otp/ \
+  -H "Content-Type: application/json" \
+  -d '{"reto":"<reto-de-la-fase-1>","codigo":"123456"}'
 
-> {%
-const body = response.parsedBody;
-client.global.set("reto", body.reto);
-// En enrolamiento, guarda el secreto para generar el codigo en tu app TOTP:
-if (body.secret) { client.global.set("mfaSecret", body.secret); }
-%}
+# Guarda el token de la fase 2 para el resto del archivo:
+TOKEN="<token-de-la-fase-2>"
 
-###
+# Código OTP incorrecto -> 401. Cuenta para el MISMO contador de bloqueo que la
+# password (RF-16/RN02): una password mala y un OTP malo suman al mismo lockout.
+curl -X POST $HOST/api/auth/otp/ \
+  -H "Content-Type: application/json" \
+  -d '{"reto":"<reto-de-la-fase-1>","codigo":"111111"}'
 
-# FASE 2: envia el codigo de 6 digitos de tu app autenticadora (o el generado
-# con el secret del enrolamiento). REST Client no calcula TOTP: pega el codigo
-# actual a mano. Devuelve el token de sesion definitivo.
-POST {{host}}/api/auth/otp/
-Content-Type: application/json
+# Password incorrecta -> 401 "Credenciales incorrectas" (RN04: nunca revela qué
+# parte falló) y registra LOGIN_FAILED. Repetirlo 5 veces dispara el bloqueo:
+# evento ACCOUNT_LOCKED (criticidad ALTA) + notificación encolada.
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"admin@acme.com","password":"password-incorrecta"}'
 
-{
-  "reto": "{{reto}}",
-  "codigo": "000000"
-}
+# Estando bloqueado -> 401 "Cuenta bloqueada...", incluso con la password
+# correcta (CA04). No re-bloquea ni suma intentos. Espera el tiempo de bloqueo
+# o resetea el contador en la base para seguir probando.
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"admin@acme.com","password":"CambiarEnPrimerLogin!"}'
 
-> {%
-const body = response.parsedBody;
-client.global.set("token", body.token);
-%}
-
-###
-
-# Codigo incorrecto -> 401 y cuenta como intento fallido (mismo bloqueo global)
-POST {{host}}/api/auth/otp/
-Content-Type: application/json
-
-{
-  "reto": "{{reto}}",
-  "codigo": "111111"
-}
-
-###
-
-# Perfil del usuario autenticado (usa el token de la fase 2)
-GET {{host}}/api/core/me/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-16/RN02 — bloqueo por intentos fallidos.
-# Repetir este POST 5 veces con password incorrecta: cada uno responde 401
-# ("Credenciales incorrectas", RN04) y registra LOGIN_FAILED. El 5o dispara el
-# bloqueo: evento ACCOUNT_LOCKED (criticidad ALTA) + notificacion encolada.
-POST {{host}}/api/auth/login/
-Content-Type: application/json
-
-{
-  "tenant_slug": "{{tenant}}",
-  "correo": "{{email}}",
-  "password": "password-incorrecta"
-}
-
-###
-
-# 6o intento estando bloqueado -> 401 con "Cuenta bloqueada..." (no cuenta, no
-# re-bloquea). Incluso con la password correcta se rechaza mientras dure el
-# bloqueo (CA04). Esperar el tiempo de bloqueo o resetear en DB para reintentar.
-POST {{host}}/api/auth/login/
-Content-Type: application/json
-
-{
-  "tenant_slug": "{{tenant}}",
-  "correo": "{{email}}",
-  "password": "{{password}}"
-}
-
-###
+# Falta un campo obligatorio -> 400 con el sobre de auth ("mensaje", no "detail")
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"admin@acme.com"}'
 
 ###########################################################
-# PERFIL
+# PERFIL Y SESIONES (RF-09 / RF-17 / RF-19)
 ###########################################################
 
-# Aprobado 🟩
-GET {{host}}/api/core/me/
-Authorization: Bearer {{token}}
+# Contexto del usuario: perfil, tenant, roles, permisos, módulos y ultimo_acceso
+curl $HOST/api/core/me/ -H "Authorization: Bearer $TOKEN"
 
-###
+# RF-19/CA01: SOLO las sesiones propias, con el flag "actual" en la de este token
+curl $HOST/api/core/sesiones/ -H "Authorization: Bearer $TOKEN"
 
-###########################################################
-# PRODUCTOS
-###########################################################
+# RF-19/CA03: cierra todas las demás sesiones y conserva la actual
+curl -X POST $HOST/api/core/sesiones/cerrar-otras/ \
+  -H "Authorization: Bearer $TOKEN"
 
-# Aprobado 🟩
-GET {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
+# RF-19/CA02: cierra una sesión propia por su jti (de la lista anterior).
+# Un jti ajeno no revoca nada y no revela que existe (RN01) -> {"revocada": false}
+curl -X DELETE "$HOST/api/core/sesiones/<jti>/" \
+  -H "Authorization: Bearer $TOKEN"
 
-###
+# RF-17: logout de la sesión en curso. Idempotente (CA02).
+curl -X POST $HOST/api/auth/logout/ -H "Authorization: Bearer $TOKEN"
 
-# Aprobado 🟩
-GET {{host}}/api/inventario/productos/?page=1&page_size=20
-Authorization: Bearer {{token}}
-
-###
-
-# Aprobado 🟩
-GET {{host}}/api/inventario/productos/?search=LAP
-Authorization: Bearer {{token}}
-
-###
-
-# Aprobado 🟩
-GET {{host}}/api/inventario/productos/?activo=true
-Authorization: Bearer {{token}}
-
-###
-
-# Aprobado 🟩
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "sku":"LAP-{{$guid}}",
-    "nombre":"Laptop 15",
-    "descripcion":"Equipo de prueba",
-    "costo_referencia":"9000",
-    "precio_venta":"13500",
-    "stock_minimo":"5"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("productoId", body.id);
-client.global.set("productoSku", body.sku);
-%}
-
-###
-
-# Repite el SKU recien creado a proposito -> debe responder 422 con campo:"sku"
-
-# Aprobado 🟩
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "sku":"{{productoSku}}",
-    "nombre":"Laptop 15 duplicada",
-    "costo_referencia":"1",
-    "precio_venta":"1"
-}
-
-###
-
-# Aprobado 🟩
-# precio_venta negativo -> debe responder 422 con campo:"precio_venta"
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "sku":"LAP-{{$guid}}",
-    "nombre":"Producto con precio invalido",
-    "costo_referencia":"1",
-    "precio_venta":"-50"
-}
-
-###
-
-# Aprobado 🟩
-# productoId se llena solo con la respuesta del POST de arriba
-PATCH {{host}}/api/inventario/productos/{{productoId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "precio_venta":"15000"
-}
-
-###
-
-# Aprobado 🟩
-DELETE {{host}}/api/inventario/productos/{{productoId}}/
-Authorization: Bearer {{token}}
-
-###
+# CA01: el mismo token después del logout -> 401 (la sesión está revocada en la
+# base, aunque el JWT no haya expirado criptográficamente)
+curl $HOST/api/core/me/ -H "Authorization: Bearer $TOKEN"
 
 ###########################################################
-# ALMACENES
+# RECUPERAR / RESTABLECER CONTRASEÑA (RF-18)
 ###########################################################
 
-# Aprobado 🟩
-GET {{host}}/api/inventario/almacenes/
-Authorization: Bearer {{token}}
+# Solicitud: SIEMPRE el mismo mensaje genérico (RN02), exista o no el correo.
+# El token viaja por correo (notificación encolada), NUNCA en la respuesta.
+curl -X POST $HOST/api/auth/recuperar/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"admin@acme.com"}'
 
-###
-
-# Aprobado 🟩
-POST {{host}}/api/inventario/almacenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"Almacén Central {{$guid}}",
-    "ubicacion":"Planta Baja"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("almacenId", body.id);
-%}
-
-###
-
-# Aprobado 🟩
-# almacenId se llena solo con la respuesta del POST de arriba
-PATCH {{host}}/api/inventario/almacenes/{{almacenId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "ubicacion":"Segundo Piso"
-}
-
-###
-
-# Aprobado 🟩
-DELETE {{host}}/api/inventario/almacenes/{{almacenId}}/
-Authorization: Bearer {{token}}
-
-###
+# Confirmación: token de un solo uso, 1 hora. Al restablecer se invalidan TODAS
+# las sesiones previas del usuario (RN03).
+curl -X POST $HOST/api/auth/restablecer/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<token-recibido-por-correo>","password":"NuevaPassword12345!"}'
 
 ###########################################################
-# CLIENTES
+# USUARIOS — DIRECTORIO Y ALTA (RF-05 / RF-06)
 ###########################################################
 
-# Aprobado 🟩
-GET {{host}}/api/ventas/clientes/
-Authorization: Bearer {{token}}
+# RF-06: directorio paginado. Exige core:usuarios:leer.
+curl $HOST/api/core/usuarios/ -H "Authorization: Bearer $TOKEN"
 
-###
+# Búsqueda libre en nombre / correo / puesto
+curl "$HOST/api/core/usuarios/?search=admin" -H "Authorization: Bearer $TOKEN"
 
-# Aprobado 🟩
-POST {{host}}/api/ventas/clientes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# Todos los filtros: estado, departamento, rol (id), rango de alta y orden.
+# orden ∈ nombre|created_at|ultimo_acceso (default nombre); &desc=true invierte.
+curl "$HOST/api/core/usuarios/?estado=activo&departamento=Ventas&orden=ultimo_acceso&desc=true" \
+  -H "Authorization: Bearer $TOKEN"
 
-{
-    "rfc_o_id_fiscal":"RFC-{{$guid}}",
-    "razon_social":"Cliente REST",
-    "correo":"cliente@test.com",
-    "telefono":"5555555555",
-    "limite_credito":"5000"
-}
+curl "$HOST/api/core/usuarios/?rol=<rol-id>&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
 
-> {%
-const body = response.parsedBody;
-client.global.set("clienteId", body.id);
-%}
+# orden fuera del catálogo -> 400 con campo:"orden" (no cae al orden por defecto)
+curl "$HOST/api/core/usuarios/?orden=inventado" -H "Authorization: Bearer $TOKEN"
 
-###
+# RF-05: alta -> 201, estado "pendiente", sin contraseña, notificación encolada.
+# Devuelve activacion_token en claro UNA sola vez. Necesita el id de un rol
+# existente del tenant (tómalo de GET /api/core/roles/).
+curl -X POST $HOST/api/core/usuarios/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"qa.rf05@acme.com","nombre_completo":"QA RF05","roles":["<rol-id>"],"puesto":"Analista","departamento":"Ventas"}'
 
-# Aprobado 🟩
-# clienteId se llena solo con la respuesta del POST de arriba
-PATCH {{host}}/api/ventas/clientes/{{clienteId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+USUARIO_ID="<id-del-usuario-creado>"
+ACTIVACION_TOKEN="<activacion_token-de-la-respuesta>"
 
-{
-    "telefono":"2222222222"
-}
+# Sin roles -> 422 (RN04/CA03: un usuario sin rol no podría hacer nada)
+curl -X POST $HOST/api/core/usuarios/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"sin.roles@acme.com","nombre_completo":"Sin Roles"}'
 
-###
+# Correo ya registrado en el tenant -> 422 (RN02)
+curl -X POST $HOST/api/core/usuarios/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"admin@acme.com","nombre_completo":"Duplicado","roles":["<rol-id>"]}'
 
-# Aprobado 🟩
-DELETE {{host}}/api/ventas/clientes/{{clienteId}}/
-Authorization: Bearer {{token}}
+# Rol que no existe en este tenant -> 422 (RN06)
+curl -X POST $HOST/api/core/usuarios/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"rol.malo@acme.com","nombre_completo":"Rol Malo","roles":["11111111-1111-1111-1111-111111111111"]}'
 
-###
+# El usuario pendiente todavía no puede autenticarse -> 401 (RN03)
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"qa.rf05@acme.com","password":"Whatever12345!"}'
 
-###########################################################
-# PROVEEDORES
-###########################################################
+# Activación (público, autoriza el token de un solo uso, no un JWT).
+# Token basura o vencido -> 422. Password bajo el mínimo de RF-22 -> 422.
+curl -X POST $HOST/api/auth/activar/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"basura","password":"Whatever12345!"}'
 
-# Aprobado 🟩
-GET {{host}}/api/compras/proveedores/
-Authorization: Bearer {{token}}
+curl -X POST $HOST/api/auth/activar/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"'"$ACTIVACION_TOKEN"'","password":"corta"}'
 
-###
+# Activación correcta -> 200, estado "activo"
+curl -X POST $HOST/api/auth/activar/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"'"$ACTIVACION_TOKEN"'","password":"Whatever12345!"}'
 
-# Aprobado 🟩
-POST {{host}}/api/compras/proveedores/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# Un solo uso: reintentar el mismo token -> 422 (CA06)
+curl -X POST $HOST/api/auth/activar/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"'"$ACTIVACION_TOKEN"'","password":"Whatever12345!"}'
 
-{
-    "rfc_o_id_fiscal":"RFC-{{$guid}}",
-    "razon_social":"Proveedor REST",
-    "correo":"proveedor@test.com",
-    "telefono":"7777777777"
-}
+# Ya activo: ahora sí autentica (fase 1 -> mfa:"enroll", es su primer login)
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"qa.rf05@acme.com","password":"Whatever12345!"}'
 
-> {%
-const body = response.parsedBody;
-client.global.set("proveedorId", body.id);
-%}
-
-###
-
-# Aprobado 🟩
-# proveedorId se llena solo con la respuesta del POST de arriba
-PATCH {{host}}/api/compras/proveedores/{{proveedorId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "telefono":"9999999999"
-}
-
-###
-
-# Aprobado 🟩
-DELETE {{host}}/api/compras/proveedores/{{proveedorId}}/
-Authorization: Bearer {{token}}
-
-###
+# Completa su fase 2 y guarda su token: sirve para probar los 403 por permiso
+TOKEN_NO_ADMIN="<token-del-usuario-sin-privilegios>"
 
 ###########################################################
-# MOVIMIENTOS DE INVENTARIO (RF-58) - Sprint 2
+# USUARIOS — EDICIÓN Y ESTADO (RF-07 / RF-08)
 ###########################################################
 
-# Producto y almacen base para las pruebas de la capa transaccional
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "sku":"MOV-{{$guid}}",
-    "nombre":"Producto para movimientos",
-    "costo_referencia":"100",
-    "precio_venta":"150",
-    "stock_minimo":"10"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("movProductoId", body.id);
-%}
-
-###
-
-POST {{host}}/api/inventario/almacenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"Almacen Movimientos {{$guid}}",
-    "ubicacion":"Bodega 1"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("movAlmacenOrigenId", body.id);
-%}
-
-###
-
-POST {{host}}/api/inventario/almacenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"Almacen Movimientos Destino {{$guid}}",
-    "ubicacion":"Bodega 2"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("movAlmacenDestinoId", body.id);
-%}
-
-###
-
-# Entrada manual: carga inicial de stock
-POST {{host}}/api/inventario/movimientos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "tipo":"entrada",
-    "cantidad":"50",
-    "costo_unitario":"100"
-}
-
-###
-
-# Salida manual
-POST {{host}}/api/inventario/movimientos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "tipo":"salida",
-    "cantidad":"5"
-}
-
-###
-
-# Salida que excede el stock disponible -> debe responder 422 con campo:"cantidad"
-POST {{host}}/api/inventario/movimientos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "tipo":"salida",
-    "cantidad":"99999"
-}
-
-###
-
-# tipo invalido -> debe responder 422 con campo:"tipo"
-POST {{host}}/api/inventario/movimientos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "tipo":"ajuste_positivo",
-    "cantidad":"1"
-}
-
-###
-
-GET {{host}}/api/inventario/movimientos/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/inventario/movimientos/?producto_id={{movProductoId}}
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# STOCK DISPONIBLE (RF-59) - Sprint 2
-###########################################################
-
-GET {{host}}/api/inventario/stock-disponible/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/inventario/stock-disponible/?producto_id={{movProductoId}}
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# AJUSTES DE INVENTARIO (RF-60) - Sprint 2
-###########################################################
-
-# Ajuste positivo (conteo fisico encontro mas stock del esperado)
-POST {{host}}/api/inventario/ajustes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "motivo":"conteo_fisico",
-    "cantidad":"10"
-}
-
-###
-
-# Ajuste negativo (merma)
-POST {{host}}/api/inventario/ajustes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "motivo":"merma",
-    "cantidad":"-3"
-}
-
-###
-
-# motivo invalido -> debe responder 422 con campo:"motivo"
-POST {{host}}/api/inventario/ajustes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "motivo":"robo",
-    "cantidad":"-1"
-}
-
-###
-
-# cantidad cero -> debe responder 422 con campo:"cantidad"
-POST {{host}}/api/inventario/ajustes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_id":"{{movAlmacenOrigenId}}",
-    "motivo":"otro",
-    "cantidad":"0"
-}
-
-###
-
-GET {{host}}/api/inventario/ajustes/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# TRANSFERENCIAS ENTRE ALMACENES (RF-61) - Sprint 2
-###########################################################
-
-POST {{host}}/api/inventario/transferencias/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_origen_id":"{{movAlmacenOrigenId}}",
-    "almacen_destino_id":"{{movAlmacenDestinoId}}",
-    "cantidad":"5"
-}
-
-###
-
-# Mismo almacen de origen y destino -> debe responder 422 con campo:"almacen_destino_id"
-POST {{host}}/api/inventario/transferencias/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "producto_id":"{{movProductoId}}",
-    "almacen_origen_id":"{{movAlmacenOrigenId}}",
-    "almacen_destino_id":"{{movAlmacenOrigenId}}",
-    "cantidad":"1"
-}
-
-###
-
-GET {{host}}/api/inventario/transferencias/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# KARDEX (RF-62) - Sprint 2
-###########################################################
-
-GET {{host}}/api/inventario/kardex/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/inventario/kardex/?sku={{productoSku}}
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# ALERTAS DE STOCK MINIMO (RF-63) - Sprint 2
-###########################################################
-
-GET {{host}}/api/inventario/alertas-stock-minimo/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/inventario/alertas-stock-minimo/?notificada=false
-Authorization: Bearer {{token}}
-
-###
-
-# Requiere que exista al menos una alerta disparada (stock <= stock_minimo);
-# reemplazar {{alertaId}} manualmente con el id devuelto por el GET anterior.
-# POST {{host}}/api/inventario/alertas-stock-minimo/{{alertaId}}/notificar/
-# Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# VALUACION DE INVENTARIO (RF-64) - Sprint 2
-###########################################################
-
-GET {{host}}/api/inventario/valuacion/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/inventario/valuacion/?almacen_id={{movAlmacenOrigenId}}
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# COMPRAS - ORDENES, RECEPCIONES, CxP, HISTORIAL (RF-47 a RF-52)
-###########################################################
-
-# Proveedor, producto y almacen propios para este bloque (el proveedorId
-# de mas arriba ya quedo inactivo por el DELETE de la seccion PROVEEDORES).
-POST {{host}}/api/compras/proveedores/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "rfc_o_id_fiscal":"RFC-OC-{{$guid}}",
-    "razon_social":"Proveedor Ordenes de Compra",
-    "correo":"oc@test.com"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocProveedorId", body.id);
-%}
-
-###
-
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "sku":"OC-{{$guid}}",
-    "nombre":"Producto para ordenes de compra",
-    "costo_referencia":"10",
-    "precio_venta":"20",
-    "stock_minimo":"1"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocProductoId", body.id);
-%}
-
-###
-
-POST {{host}}/api/inventario/almacenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"Almacen Compras {{$guid}}"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocAlmacenId", body.id);
-%}
-
-###########################################################
-# CONFIGURACION DE UMBRAL DE APROBACION (RF-52)
-###########################################################
-
-GET {{host}}/api/compras/config-aprobacion/
-Authorization: Bearer {{token}}
-
-###
-
-PUT {{host}}/api/compras/config-aprobacion/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "umbral_monto":"500"
-}
-
-###
-
-# umbral negativo -> debe responder 422 con campo:"umbral_monto"
-PUT {{host}}/api/compras/config-aprobacion/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "umbral_monto":"-1"
-}
-
-###########################################################
-# ORDENES DE COMPRA (RF-47, RF-48)
-###########################################################
-
-# Total 100, dentro del umbral (500) -> estado "enviada"
-POST {{host}}/api/compras/ordenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "proveedor_id":"{{ocProveedorId}}",
-    "lineas":[
-        {"producto_id":"{{ocProductoId}}", "cantidad":"10", "costo_unitario":"10"}
-    ]
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocOrdenId", body.id);
-client.global.set("ocLineaId", body.lineas[0].id);
-%}
-
-###
-
-# Total 10000, excede el umbral -> estado "pendiente_aprobacion"
-POST {{host}}/api/compras/ordenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "proveedor_id":"{{ocProveedorId}}",
-    "lineas":[
-        {"producto_id":"{{ocProductoId}}", "cantidad":"1000", "costo_unitario":"10"}
-    ]
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocOrdenPendienteId", body.id);
-%}
-
-###
-
-# sin lineas -> debe responder 422 con campo:"lineas"
-POST {{host}}/api/compras/ordenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "proveedor_id":"{{ocProveedorId}}",
-    "lineas":[]
-}
-
-###
-
-GET {{host}}/api/compras/ordenes/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/compras/ordenes/?estado=pendiente_aprobacion
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/compras/ordenes/{{ocOrdenId}}/
-Authorization: Bearer {{token}}
-
-###
-
-# aprobacion manual (stand-in del motor de aprobaciones, aun no implementado):
-# pendiente_aprobacion -> enviada
-PATCH {{host}}/api/compras/ordenes/{{ocOrdenPendienteId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "estado":"enviada"
-}
-
-###
-
-# transicion de estado no permitida -> debe responder 422 con campo:"estado"
-PATCH {{host}}/api/compras/ordenes/{{ocOrdenPendienteId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "estado":"recibida_total"
-}
-
-###########################################################
-# RECEPCION DE MERCANCIA (RF-49) Y CUENTA POR PAGAR (RF-50)
-###########################################################
-
-# Recepcion parcial: 6 de 10 -> orden pasa a "recibida_parcial"
-POST {{host}}/api/compras/recepciones/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "orden_id":"{{ocOrdenId}}",
-    "almacen_id":"{{ocAlmacenId}}",
-    "lineas":[
-        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"6", "costo_unitario":"11"}
-    ]
-}
-
-###
-
-# excede la cantidad pendiente (quedan 4) -> debe responder 422 con campo:"lineas[0].cantidad"
-POST {{host}}/api/compras/recepciones/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "orden_id":"{{ocOrdenId}}",
-    "almacen_id":"{{ocAlmacenId}}",
-    "lineas":[
-        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"5", "costo_unitario":"11"}
-    ]
-}
-
-###
-
-# recibe el remanente (4) -> orden pasa a "recibida_total"
-POST {{host}}/api/compras/recepciones/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "orden_id":"{{ocOrdenId}}",
-    "almacen_id":"{{ocAlmacenId}}",
-    "lineas":[
-        {"orden_compra_linea_id":"{{ocLineaId}}", "cantidad":"4", "costo_unitario":"11"}
-    ]
-}
-
-###
-
-GET {{host}}/api/compras/ordenes/{{ocOrdenId}}/
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/compras/recepciones/?orden_id={{ocOrdenId}}
-Authorization: Bearer {{token}}
-
-###
-
-GET {{host}}/api/compras/cuentas-por-pagar/?proveedor_id={{ocProveedorId}}
-Authorization: Bearer {{token}}
-
-###
-
-# el stock disponible del producto debe reflejar las dos recepciones (10 en total)
-GET {{host}}/api/inventario/stock-disponible/?producto_id={{ocProductoId}}
-Authorization: Bearer {{token}}
-
-###########################################################
-# CANCELAR ORDEN DE COMPRA (RF-48)
-###########################################################
-
-# orden ya recibida_total -> no puede cancelarse, debe responder 422
-POST {{host}}/api/compras/ordenes/{{ocOrdenId}}/cancelar/
-Authorization: Bearer {{token}}
-
-###
-
-# orden nueva sin recepciones, se puede cancelar en su totalidad
-POST {{host}}/api/compras/ordenes/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "proveedor_id":"{{ocProveedorId}}",
-    "lineas":[
-        {"producto_id":"{{ocProductoId}}", "cantidad":"5", "costo_unitario":"1"}
-    ]
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("ocOrdenCancelarId", body.id);
-%}
-
-###
-
-POST {{host}}/api/compras/ordenes/{{ocOrdenCancelarId}}/cancelar/
-Authorization: Bearer {{token}}
-
-###
-
-# orden ya cancelada -> no puede editarse, debe responder 422
-PATCH {{host}}/api/compras/ordenes/{{ocOrdenCancelarId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "estado":"enviada"
-}
-
-###########################################################
-# HISTORIAL DE COMPRAS POR PROVEEDOR (RF-51)
-###########################################################
-
-GET {{host}}/api/compras/proveedores/{{ocProveedorId}}/historial/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# EDITAR USUARIO (RF-07)
-###########################################################
-
-# nuevoUsuarioId lo captura el alta de RF-05, mas abajo
-
-# TENANT_ADMIN: modificacion total
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre_completo":"Nombre Editado",
-    "telefono":"5551234567"
-}
-
-###
+# TENANT_ADMIN: modificación de datos generales
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre_completo":"Nombre Editado","telefono":"5551234567","puesto":"Analista Senior"}'
 
 # roles fuera de RF-07 -> 422 (se administran en RF-14/RF-15)
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"roles":["00000000-0000-0000-0000-000000000000"]}'
 
-{
-    "roles":["00000000-0000-0000-0000-000000000000"]
-}
-
-###
-
-# estado fuera de RF-07 -> 422 (es RF-08)
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "estado":"suspendido"
-}
-
-###
+# estado fuera de RF-07 -> 422 (es RF-08, más abajo)
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"estado":"suspendido"}'
 
 # RN03: correo ya registrado en el tenant -> 422
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"admin@acme.com"}'
 
-{
-    "correo":"admin@acme.com"
-}
+# RN05/CA04: cambiar el correo pasa a "pendiente_verificacion" y devuelve
+# verificacion_token. El usuario NO puede autenticarse hasta reconfirmar.
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"correo.nuevo@acme.com"}'
 
-###
+# Reconfirmación: MISMO endpoint de activación, sin password -> 200 y activo.
+# Enviar password aquí (ya tiene una) -> 422.
+curl -X POST $HOST/api/auth/activar/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<verificacion_token>"}'
 
-# RN05/CA04: cambio de correo -> pendiente_verificacion + token de validacion
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# El propietario edita solo sus datos personales (sin core:usuarios:editar)
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre_completo":"Yo Mismo","telefono":"5559999999"}'
 
-{
-    "correo":"correo.nuevo@acme.com"
-}
+# El propietario NO puede cambiar su propio correo -> 422
+curl -X PATCH $HOST/api/core/usuarios/$USUARIO_ID/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"otro@acme.com"}'
 
-> {%
-const body = response.parsedBody;
-client.global.set("verificacionToken", body.verificacion_token);
-%}
+# El propietario NO puede editar a un tercero -> 403
+curl -X PATCH $HOST/api/core/usuarios/00000000-0000-0000-0000-000000000000/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre_completo":"Ajeno"}'
 
-###
+# RF-07 / RF-16 RN07: reseteo de MFA, exclusivo del TENANT_ADMIN. Deja al usuario
+# sin segundo factor; su próximo login devuelve mfa:"enroll" con un secreto nuevo.
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reset-mfa/ \
+  -H "Authorization: Bearer $TOKEN"
 
-# el usuario no puede autenticarse hasta reconfirmar -> 401
-POST {{host}}/api/auth/login/
-Content-Type: application/json
+# El propio usuario NO puede resetearse el MFA -> 403
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reset-mfa/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN"
 
-{
-    "tenant_slug":"{{tenant}}",
-    "correo":"correo.nuevo@acme.com",
-    "password":"{{nuevaPassword}}"
-}
+# RF-08: suspender cierra todas sus sesiones (RN03) y bloquea su login (RN02).
+# No se puede suspender al último TENANT_ADMIN activo -> 422 (RN04).
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/suspender/ \
+  -H "Authorization: Bearer $TOKEN"
 
-###
+# CA03: el suspendido no puede entrar -> 401 "Su cuenta ha sido suspendida..."
+curl -X POST $HOST/api/auth/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_slug":"acme","correo":"qa.rf05@acme.com","password":"Whatever12345!"}'
 
-# ya tiene contrasena: enviarla en la reconfirmacion -> 422
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
+# RN05/CA04: reactivar restaura el login y conserva los roles previos
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reactivar/ \
+  -H "Authorization: Bearer $TOKEN"
 
-{
-    "token":"{{verificacionToken}}",
-    "password":"{{nuevaPassword}}"
-}
-
-###
-
-# reconfirmacion de correo: mismo endpoint, sin password -> 200 y estado activo
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
-
-{
-    "token":"{{verificacionToken}}"
-}
-
-###
-
-# el propietario edita solo sus datos personales (sin core:usuarios:editar)
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{tokenNoAdmin}}
-Content-Type: application/json
-
-{
-    "nombre_completo":"Yo Mismo",
-    "telefono":"5559999999"
-}
-
-###
-
-# el propietario NO puede cambiar su propio correo -> 422
-PATCH {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/
-Authorization: Bearer {{tokenNoAdmin}}
-Content-Type: application/json
-
-{
-    "correo":"otro@acme.com"
-}
-
-###
-
-# el propietario NO puede editar a un tercero -> 403
-PATCH {{host}}/api/core/usuarios/00000000-0000-0000-0000-000000000000/
-Authorization: Bearer {{tokenNoAdmin}}
-Content-Type: application/json
-
-{
-    "nombre_completo":"Ajeno"
-}
-
-###
-
-# RF-07 / RF-16 RN07 — reseteo de MFA (accion exclusiva del TENANT_ADMIN).
-# Deja al usuario sin segundo factor; su proximo login (fase 1) devolvera
-# mfa:"enroll" con un secreto nuevo para re-enrolar antes de completar acceso.
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reset-mfa/
-Authorization: Bearer {{token}}
-
-###
-
-# el propio usuario NO puede resetearse el MFA -> 403 (no es admin)
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reset-mfa/
-Authorization: Bearer {{tokenNoAdmin}}
-
-###
+# RF-19/RN02: el TENANT_ADMIN cierra TODAS las sesiones de un usuario. Solo
+# devuelve el conteo, sin detalle de dispositivos (privacidad).
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/cerrar-sesiones/ \
+  -H "Authorization: Bearer $TOKEN"
 
 ###########################################################
-# SUSPENDER / REACTIVAR USUARIO (RF-08)
+# ROLES Y PERMISOS — RBAC (RF-10 a RF-15)
 ###########################################################
 
-# Suspender: cierra todas sus sesiones (RN03) y bloquea su login (RN02).
-# No puede suspenderse al ultimo TENANT_ADMIN activo (RN04).
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/suspender/
-Authorization: Bearer {{token}}
+# RF-11/CA01-CA02: catálogo maestro agrupado por dominio. Los permisos de un
+# módulo desactivado NO se ocultan: vienen con inerte:true.
+curl $HOST/api/core/permisos/ -H "Authorization: Bearer $TOKEN"
 
-###
+# RF-11: roles del tenant con sus permisos, inertes y usuarios asignados
+curl $HOST/api/core/roles/ -H "Authorization: Bearer $TOKEN"
 
-# El usuario suspendido no puede iniciar sesion -> 401 "Su cuenta ha sido
-# suspendida. Contacte al administrador." (CA03)
-POST {{host}}/api/auth/login/
-Content-Type: application/json
+# Filtros: búsqueda por nombre y ?activo=false para ver los dados de baja
+curl "$HOST/api/core/roles/?search=LECTOR&activo=true" -H "Authorization: Bearer $TOKEN"
 
-{
-  "tenant_slug": "{{tenant}}",
-  "correo": "{{nuevoCorreo}}",
-  "password": "{{nuevaPassword}}"
-}
+# RF-10: alta de rol personalizado con permisos del catálogo maestro
+curl -X POST $HOST/api/core/roles/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"LECTOR_INVENTARIO","permisos":["inventario:productos:leer","inventario:stock:leer"]}'
 
-###
-
-# Reactivar: restaura el login y conserva los roles previos (RN05/CA04)
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/reactivar/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# SESIONES: LOGOUT Y REVOCACION (RF-17 / RF-19)
-###########################################################
-
-# RF-19/CA01: el usuario lista SOLO sus propias sesiones activas (flag "actual")
-GET {{host}}/api/core/sesiones/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-19/CA03: cerrar todas las demas sesiones, conservar la actual
-POST {{host}}/api/core/sesiones/cerrar-otras/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-19/CA02: cerrar una sesion propia por su jti (sustituir por uno real de la
-# lista anterior). Un jti ajeno no revoca nada (RN01).
-DELETE {{host}}/api/core/sesiones/00000000-0000-0000-0000-000000000000/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-19/RN02: el TENANT_ADMIN cierra TODAS las sesiones de un usuario (solo
-# devuelve el conteo, sin detalle de dispositivos)
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/cerrar-sesiones/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-17: logout de la sesion en curso. Tras esto, el mismo token da 401.
-POST {{host}}/api/auth/logout/
-Authorization: Bearer {{token}}
-
-###
-
-# CA01: el mismo token tras logout -> 401
-GET {{host}}/api/core/me/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# RECUPERAR / RESTABLECER CONTRASENA (RF-18)
-###########################################################
-
-# Solicitud: SIEMPRE responde el mismo mensaje generico (RN02, no revela si el
-# correo existe). El token se envia por correo (notificacion encolada), NO en la
-# respuesta. Un correo inexistente da exactamente la misma respuesta.
-POST {{host}}/api/auth/recuperar/
-Content-Type: application/json
-
-{
-  "tenant_slug": "{{tenant}}",
-  "correo": "{{email}}"
-}
-
-###
-
-# Confirmacion: token de un solo uso (1 h). Al restablecer se invalidan TODAS
-# las sesiones previas del usuario (RN03). Sustituir por el token real recibido.
-POST {{host}}/api/auth/restablecer/
-Content-Type: application/json
-
-{
-  "token": "TOKEN-RECIBIDO-POR-CORREO",
-  "password": "NuevaPassword12345!"
-}
-
-###
-
-# /me ahora incluye usuario.ultimo_acceso (RF-09/CA03)
-GET {{host}}/api/core/me/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# AUDITORIA Y REPORTES (RF-21 / RF-23 / RF-24)
-###########################################################
-
-# RF-21: consultar bitacora. Filtros ?usuario_id= ?operacion= ?entidad=
-# ?desde=&hasta=. Solo lectura. Exige core:bitacora:leer.
-GET {{host}}/api/core/bitacora/?operacion=LOGIN
-Authorization: Bearer {{token}}
-
-###
-
-# RF-24: exportar la consulta a CSV (mismos filtros). Se audita como EXPORT.
-# Exige core:bitacora:exportar. (PDF pendiente: requiere libreria.)
-GET {{host}}/api/core/bitacora/export/?entidad=usuario
-Authorization: Bearer {{token}}
-
-###
-
-# RF-23: reporte de actividad por usuario. Filtros ?desde=&hasta=
-# ?departamento= ?puesto=. Exige core:reportes:leer.
-GET {{host}}/api/core/reportes/actividad/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# POLITICAS DE SEGURIDAD DEL TENANT (RF-22)
-###########################################################
-
-# Consultar la politica vigente + los limites min/max de plataforma
-GET {{host}}/api/core/config-seguridad/
-Authorization: Bearer {{token}}
-
-###
-
-# Endurecer la politica (dentro de los limites). No invalida contrasenas ni
-# sesiones ya existentes (RN02/CA02); aplica a los siguientes cambios.
-PATCH {{host}}/api/core/config-seguridad/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "politica_password_min_len": 16,
-    "bloqueo_minutos": 45
-}
-
-###
-
-# CA01/RN01: por debajo del minimo de plataforma (8) -> 422 con el limite
-PATCH {{host}}/api/core/config-seguridad/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "politica_password_min_len": 6
-}
-
-###
-
-###########################################################
-# ROLES Y PERMISOS - RBAC (RF-10 a RF-15)
-###########################################################
-
-# catalogo maestro agrupado por dominio, con marca de inertes (RF-11/CA01-CA02)
-GET {{host}}/api/core/permisos/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-10: alta de rol personalizado
-POST {{host}}/api/core/roles/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"LECTOR_INVENTARIO",
-    "permisos":["inventario:productos:leer", "inventario:stock:leer"]
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("rolId", body.id);
-%}
-
-###
+ROL_ID="<id-del-rol-creado>"
 
 # RF-10/CA03: sin permisos -> 422
-POST {{host}}/api/core/roles/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+curl -X POST $HOST/api/core/roles/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"SIN_PERMISOS","permisos":[]}'
 
-{
-    "nombre":"SIN_PERMISOS",
-    "permisos":[]
-}
-
-###
-
-# RF-10/RN02: permiso fuera del catalogo maestro -> 422
-POST {{host}}/api/core/roles/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"INVENTADO",
-    "permisos":["ventas:loquesea:crear"]
-}
-
-###
+# RF-10/RN02: permiso fuera del catálogo maestro -> 422
+curl -X POST $HOST/api/core/roles/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"INVENTADO","permisos":["ventas:loquesea:crear"]}'
 
 # RF-10/RN03: nombre duplicado en el tenant -> 422
-POST {{host}}/api/core/roles/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+curl -X POST $HOST/api/core/roles/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"LECTOR_INVENTARIO","permisos":["inventario:productos:leer"]}'
 
-{
-    "nombre":"LECTOR_INVENTARIO",
-    "permisos":["inventario:productos:leer"]
-}
+# RF-12: cambiar el conjunto de permisos. Surte efecto en la SIGUIENTE petición
+# de cualquier usuario con ese rol (RN01), sin esperar a que expire su token.
+curl -X PATCH $HOST/api/core/roles/$ROL_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"permisos":["inventario:productos:leer","inventario:productos:crear"]}'
 
-###
+# RF-12/CA02: un rol de sistema (TENANT_ADMIN) no se puede modificar -> 403
+curl -X PATCH "$HOST/api/core/roles/<id-de-TENANT_ADMIN>/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"OTRO_NOMBRE"}'
 
-# RF-11: roles del tenant con permisos, inertes y usuarios asignados
-GET {{host}}/api/core/roles/
-Authorization: Bearer {{token}}
+# RF-14: asignar rol(es) a un usuario -> devuelve sus roles vigentes
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/roles/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"roles":["'"$ROL_ID"'"]}'
 
-###
+# RF-15: revocar un rol
+curl -X DELETE $HOST/api/core/usuarios/$USUARIO_ID/roles/$ROL_ID/ \
+  -H "Authorization: Bearer $TOKEN"
 
-# RF-12: modificar el conjunto de permisos (surte efecto en la siguiente peticion)
-PATCH {{host}}/api/core/roles/{{rolId}}/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# RF-13/CA01: con usuarios asignados la baja se bloquea -> 422 con
+# usuarios_asignados y confirmar_con:"?desactivar=true"
+curl -X DELETE $HOST/api/core/roles/$ROL_ID/ \
+  -H "Authorization: Bearer $TOKEN"
 
-{
-    "permisos":["inventario:productos:leer", "inventario:productos:crear"]
-}
+# RF-13: baja lógica confirmada
+curl -X DELETE "$HOST/api/core/roles/$ROL_ID/?desactivar=true" \
+  -H "Authorization: Bearer $TOKEN"
 
-###
-
-# RF-12/CA02: el rol de sistema TENANT_ADMIN no puede modificarse -> 403
-# (sustituir por el id real de TENANT_ADMIN en core.rol)
-PATCH {{host}}/api/core/roles/00000000-0000-0000-0000-000000000000/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "nombre":"OTRO_NOMBRE"
-}
-
-###
-
-# RF-14: asignar rol a un usuario
-POST {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/roles/
-Authorization: Bearer {{token}}
-Content-Type: application/json
-
-{
-    "roles":["{{rolId}}"]
-}
-
-###
-
-# RF-15: revocar rol
-DELETE {{host}}/api/core/usuarios/{{nuevoUsuarioId}}/roles/{{rolId}}/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-13/CA01: con usuarios asignados se bloquea -> 422
-DELETE {{host}}/api/core/roles/{{rolId}}/
-Authorization: Bearer {{token}}
-
-###
-
-# RF-13: baja logica confirmada
-DELETE {{host}}/api/core/roles/{{rolId}}/?desactivar=true
-Authorization: Bearer {{token}}
-
-###
-
-# Autorizacion: usuario sin el permiso -> 403 con el codigo requerido
-# (tokenNoAdmin lo emite la seccion de RF-05, mas abajo)
-POST {{host}}/api/inventario/productos/
-Authorization: Bearer {{tokenNoAdmin}}
-Content-Type: application/json
-
-{
-    "sku":"DENEGADO",
-    "nombre":"No autorizado"
-}
-
-###
+# Autorización: un usuario sin el permiso -> 403 con permiso_requerido
+curl -X POST $HOST/api/inventario/productos/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN" \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"DENEGADO","nombre":"No autorizado"}'
 
 ###########################################################
-# ALTA Y ACTIVACION DE USUARIOS (RF-05)
+# POLÍTICAS DE SEGURIDAD DEL TENANT (RF-22)
 ###########################################################
 
-# El rol a asignar debe existir en el tenant. /api/core/me/ devuelve los
-# nombres de rol del usuario autenticado, pero no sus ids: tomar el id de
-# TENANT_ADMIN de core.rol y ponerlo aqui.
-@rolId = 00000000-0000-0000-0000-000000000000
-@nuevoCorreo = qa.rf05@acme.com
-@nuevaPassword = Whatever12345!
+# Política vigente + los límites min/max que impone la plataforma
+curl $HOST/api/core/config-seguridad/ -H "Authorization: Bearer $TOKEN"
 
-# RF-06: directorio paginado. Busqueda ?search= (nombre/correo/puesto),
-# filtros ?estado= ?departamento= ?rol=<id> ?desde=&hasta=, orden
-# ?orden=nombre|created_at|ultimo_acceso (&desc=true). Exige core:usuarios:leer.
-GET {{host}}/api/core/usuarios/?orden=nombre
-Authorization: Bearer {{token}}
+# Endurecer la política. No invalida contraseñas ni sesiones existentes
+# (RN02/CA02): aplica a los siguientes cambios y a las siguientes sesiones.
+curl -X PATCH $HOST/api/core/config-seguridad/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"politica_password_min_len":16,"bloqueo_minutos":45}'
 
-###
+# PUT es alias de PATCH: tampoco reemplaza la config completa, los campos
+# ausentes se conservan
+curl -X PUT $HOST/api/core/config-seguridad/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"intentos_max_ventana":3}'
 
-GET {{host}}/api/core/usuarios/?search=admin
-Authorization: Bearer {{token}}
+# CA01/RN01: por debajo del mínimo de plataforma (8) -> 422 con min y max
+curl -X PATCH $HOST/api/core/config-seguridad/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"politica_password_min_len":6}'
 
-###
+###########################################################
+# AUDITORÍA Y REPORTES (RF-21 / RF-23 / RF-24)
+###########################################################
 
-# alta -> 201, estado 'pendiente', sin password, notificacion en cola.
-# puesto/departamento son opcionales (los usa el directorio RF-06).
-POST {{host}}/api/core/usuarios/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# RF-21: bitácora, solo lectura. Exige core:bitacora:leer.
+curl "$HOST/api/core/bitacora/?operacion=LOGIN" -H "Authorization: Bearer $TOKEN"
 
-{
-    "correo":"{{nuevoCorreo}}",
-    "nombre_completo":"QA RF05",
-    "roles":["{{rolId}}"],
-    "puesto":"Analista",
-    "departamento":"Ventas"
-}
+# Todos sus filtros
+curl "$HOST/api/core/bitacora/?usuario_id=<usuario-id>&entidad=usuario&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
 
-> {%
-const body = response.parsedBody;
-client.global.set("activacionToken", body.activacion_token);
-client.global.set("nuevoUsuarioId", body.id);
-%}
+# RF-24: exportar la MISMA consulta a archivo (mismos filtros, sin paginar).
+# Exige core:bitacora:exportar y se audita como evento EXPORT.
+curl "$HOST/api/core/bitacora/export/?entidad=usuario&formato=csv" \
+  -H "Authorization: Bearer $TOKEN" -o bitacora.csv
 
-###
+curl "$HOST/api/core/bitacora/export/?formato=pdf" \
+  -H "Authorization: Bearer $TOKEN" -o bitacora.pdf
 
-# sin roles -> 422 (RN04/CA03)
-POST {{host}}/api/core/usuarios/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# RF-23: actividad por usuario. Sin ?formato= devuelve el sobre paginado.
+# Exige core:reportes:leer.
+curl "$HOST/api/core/reportes/actividad/?departamento=Ventas&puesto=Analista&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
 
-{
-    "correo":"sin.roles@acme.com",
-    "nombre_completo":"Sin Roles"
-}
+curl "$HOST/api/core/reportes/actividad/?formato=csv" \
+  -H "Authorization: Bearer $TOKEN" -o actividad.csv
 
-###
+# formato desconocido -> 400 con campo:"formato" (no devuelve JSON en silencio)
+curl "$HOST/api/core/reportes/actividad/?formato=xml" -H "Authorization: Bearer $TOKEN"
 
-# correo ya registrado en el tenant -> 422 (RN02)
-POST {{host}}/api/core/usuarios/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+###########################################################
+# PORTAL DE PLATAFORMA — SESIÓN DEL SYSADMIN
+#
+# Superficie separada de la del tenant: token con typ="sysadmin", sesión en
+# core.sesion_sysadmin, login de UNA fase y sin MFA. Habilita RF-01..04.
+#
+# REQUISITO: sembrar el primer SysAdmin (no hay ninguno por defecto):
+#   python manage.py crear_sysadmin --email root@novaerp.local
+###########################################################
 
-{
-    "correo":"admin@acme.com",
-    "nombre_completo":"Duplicado",
-    "roles":["{{rolId}}"]
-}
+curl -X POST $HOST/api/admin/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"root@novaerp.local","password":"UnaClaveSeguraDeMin12Chars"}'
 
-###
+ADMIN_TOKEN="<token-de-plataforma>"
 
-# rol inexistente en este tenant -> 422 (RN06)
-POST {{host}}/api/core/usuarios/
-Authorization: Bearer {{token}}
-Content-Type: application/json
+# Password incorrecta -> 401 (se audita LOGIN_FAILED; sin bloqueo por ahora)
+curl -X POST $HOST/api/admin/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"root@novaerp.local","password":"incorrecta"}'
 
-{
-    "correo":"rol.malo@acme.com",
-    "nombre_completo":"Rol Malo",
-    "roles":["11111111-1111-1111-1111-111111111111"]
-}
+# Correo inexistente -> 401 idéntico (no revela existencia; se audita el intento)
+curl -X POST $HOST/api/admin/login/ \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"noexiste@novaerp.local","password":"loquesea1234"}'
 
-###
+# Logout de plataforma; el mismo token queda revocado de inmediato
+curl -X POST $HOST/api/admin/logout/ -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# el usuario pendiente no puede autenticarse todavia -> 401 (RN03)
-POST {{host}}/api/auth/login/
-Content-Type: application/json
+# Reusarlo tras el logout -> 401 (idempotente). Sin token -> 401.
+curl -X POST $HOST/api/admin/logout/ -H "Authorization: Bearer $ADMIN_TOKEN"
+curl -X POST $HOST/api/admin/logout/
 
-{
-    "tenant_slug":"{{tenant}}",
-    "correo":"{{nuevoCorreo}}",
-    "password":"{{nuevaPassword}}"
-}
+# AISLAMIENTO: token de sysadmin en un endpoint de tenant -> 401
+curl $HOST/api/core/me/ -H "Authorization: Bearer $ADMIN_TOKEN"
 
-###
+# AISLAMIENTO inverso: token de tenant en el portal de plataforma -> 401
+curl -X POST $HOST/api/admin/logout/ -H "Authorization: Bearer $TOKEN"
 
-# token invalido o vencido -> 422
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
+###########################################################
+# MULTI-TENENCIA (RF-01 a RF-04) — exige $ADMIN_TOKEN vivo
+###########################################################
 
-{
-    "token":"basura",
-    "password":"{{nuevaPassword}}"
-}
+# RF-01: registrar tenant. Nace "pendiente" y devuelve admin_inicial y
+# activacion_token (conveniencia de desarrollo; en producción va por correo).
+curl -X POST $HOST/api/admin/tenants/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"probadora","razon_social":"Probadora SA de CV","dominio_comercial":"Servicios","correo":"jefa@probadora.com","nombre_completo":"Jefa Probadora","plan":"STARTER"}'
 
-###
+TENANT_ID="<id-del-tenant>"
+ACTIVACION_TENANT="<activacion_token-del-tenant>"
 
-# password bajo el minimo de config_seguridad_tenant -> 422 (RF-22)
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
+# RF-01/CA10: dominio reservado -> 422 "Este dominio esta reservado..."
+curl -X POST $HOST/api/admin/tenants/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"admin","razon_social":"Reservada SA","correo":"x@reservada.com","nombre_completo":"X","plan":"BUSINESS"}'
 
-{
-    "token":"{{activacionToken}}",
-    "password":"corta"
-}
+# RF-01/RN04: correo ya usado en la plataforma -> 422
+curl -X POST $HOST/api/admin/tenants/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"slug":"otra-org","razon_social":"Otra Org SA","correo":"admin@acme.com","nombre_completo":"X","plan":"BUSINESS"}'
 
-###
+# RF-01 activación (PÚBLICO, sin token de sesión): el admin inicial fija su
+# contraseña y en cascada el usuario Y el tenant pasan a "activo".
+curl -X POST $HOST/api/auth/activar-tenant/ \
+  -H "Content-Type: application/json" \
+  -d '{"token":"'"$ACTIVACION_TENANT"'","password":"ClaveSegura2026"}'
 
-# activacion -> 200, estado 'activo'
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
+# RF-02: listado. OJO: este endpoint pagina a 50 como máximo (no 100), y 50 es
+# también el valor por defecto. orden ∈ razon_social|created_at|estado|plan.
+curl "$HOST/api/admin/tenants/?search=probadora&orden=created_at&desc=true&page_size=50" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 
-{
-    "token":"{{activacionToken}}",
-    "password":"{{nuevaPassword}}"
-}
+curl "$HOST/api/admin/tenants/?estado=activo&plan=STARTER&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 
-###
+# RF-02/CA05: detalle con módulos activos y consumo de licencias
+curl $HOST/api/admin/tenants/$TENANT_ID/ -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# token de un solo uso: reintentar -> 422 (CA06)
-POST {{host}}/api/auth/activar/
-Content-Type: application/json
+# RF-03: renombrar. No afecta a los datos existentes.
+curl -X PATCH $HOST/api/admin/tenants/$TENANT_ID/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"razon_social":"Probadora Renombrada SA"}'
 
-{
-    "token":"{{activacionToken}}",
-    "password":"{{nuevaPassword}}"
-}
+# RF-03/CA08: activar un módulo que no está en el plan -> 422
+# (STARTER trae INVENTARIO; VENTAS no)
+curl -X PATCH $HOST/api/admin/tenants/$TENANT_ID/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"modulos":{"activar":["VENTAS"]}}'
 
-###
+# RF-03: subir a BUSINESS y activar VENTAS (su dependencia INVENTARIO ya está
+# activa). Dos cambios en un mismo PATCH.
+curl -X PATCH $HOST/api/admin/tenants/$TENANT_ID/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"plan":"BUSINESS","modulos":{"activar":["VENTAS"]}}'
 
-# ya activado: ahora si autentica -> 200
-POST {{host}}/api/auth/login/
-Content-Type: application/json
+# RF-03/RN07/CA09: desactivar INVENTARIO, del que depende VENTAS, SIN confirmar
+# -> 422 con requiere_confirmar_cascada:true y modulos_afectados
+curl -X PATCH $HOST/api/admin/tenants/$TENANT_ID/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"modulos":{"desactivar":["INVENTARIO"]}}'
 
-{
-    "tenant_slug":"{{tenant}}",
-    "correo":"{{nuevoCorreo}}",
-    "password":"{{nuevaPassword}}"
-}
+# La misma desactivación CON confirmación -> 200 (apaga INVENTARIO y sus
+# dependientes en un solo proceso atómico)
+curl -X PATCH $HOST/api/admin/tenants/$TENANT_ID/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"modulos":{"desactivar":["INVENTARIO"]},"confirmar_cascada":true}'
 
-> {%
-const body = response.parsedBody;
-client.global.set("tokenNoAdmin", body.token);
-%}
+# RF-04: suspender (tipo ∈ cumplimiento|administrativa + motivo). Invalida todas
+# las sesiones de sus usuarios y bloquea su login.
+curl -X POST $HOST/api/admin/tenants/$TENANT_ID/suspender/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tipo":"administrativa","motivo":"Impago del periodo"}'
 
-###
+# RF-04/RN05: reactivar, sin pérdida de información
+curl -X POST $HOST/api/admin/tenants/$TENANT_ID/reactivar/ \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# usuario sin rol TENANT_ADMIN dando de alta usuarios -> 403
-POST {{host}}/api/core/usuarios/
-Authorization: Bearer {{tokenNoAdmin}}
-Content-Type: application/json
+# RF-04: baja lógica con ?baja=true. Reversible con reactivar.
+curl -X POST "$HOST/api/admin/tenants/$TENANT_ID/suspender/?baja=true" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tipo":"administrativa","motivo":"Cierre de cuenta"}'
 
-{
-    "correo":"otro@acme.com",
-    "nombre_completo":"Otro",
-    "roles":["{{rolId}}"]
-}
+###########################################################
+# INVENTARIO — CATÁLOGOS (RF-53 a RF-57)
+###########################################################
 
-###
+curl $HOST/api/inventario/productos/ -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/productos/?page=1&page_size=20" -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/productos/?search=LAP&activo=true" -H "Authorization: Bearer $TOKEN"
+
+# Alta. Solo sku y nombre son obligatorios: costo_referencia, precio_venta y
+# stock_minimo se guardan en 0 si se omiten.
+curl -X POST $HOST/api/inventario/productos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"LAP-001","nombre":"Laptop 15","descripcion":"Equipo de prueba","costo_referencia":"9000","precio_venta":"13500","stock_minimo":"5"}'
+
+PRODUCTO_ID="<id-del-producto>"
+
+# SKU repetido -> 422 con campo:"sku"
+curl -X POST $HOST/api/inventario/productos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"LAP-001","nombre":"Laptop 15 duplicada","costo_referencia":"1","precio_venta":"1"}'
+
+# precio_venta negativo -> 422 con campo:"precio_venta"
+curl -X POST $HOST/api/inventario/productos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sku":"LAP-002","nombre":"Precio invalido","costo_referencia":"1","precio_venta":"-50"}'
+
+curl -X PATCH $HOST/api/inventario/productos/$PRODUCTO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"precio_venta":"15000"}'
+
+# Baja lógica: el histórico de movimientos y el kardex se conservan
+curl -X DELETE $HOST/api/inventario/productos/$PRODUCTO_ID/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# Almacenes: mismos filtros (?search= busca en el nombre)
+curl "$HOST/api/inventario/almacenes/?search=Central&activo=true" -H "Authorization: Bearer $TOKEN"
+
+curl -X POST $HOST/api/inventario/almacenes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Almacen Central","ubicacion":"Planta Baja"}'
+
+ALMACEN_ID="<id-del-almacen>"
+ALMACEN_DESTINO_ID="<id-de-un-segundo-almacen>"
+
+curl -X PATCH $HOST/api/inventario/almacenes/$ALMACEN_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"ubicacion":"Segundo Piso"}'
+
+curl -X DELETE $HOST/api/inventario/almacenes/$ALMACEN_ID/ \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# INVENTARIO — MOVIMIENTOS Y CONSULTAS (RF-58 a RF-64)
+###########################################################
+
+# RF-58: entrada manual (carga inicial de stock)
+curl -X POST $HOST/api/inventario/movimientos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","tipo":"entrada","cantidad":"50","costo_unitario":"100"}'
+
+# Salida manual
+curl -X POST $HOST/api/inventario/movimientos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","tipo":"salida","cantidad":"5"}'
+
+# Salida que excede el stock disponible -> 422 con campo:"cantidad"
+curl -X POST $HOST/api/inventario/movimientos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","tipo":"salida","cantidad":"99999"}'
+
+# tipo inválido en el ALTA -> 422 con campo:"tipo" (solo entrada|salida son
+# movimientos manuales; los de ajuste y transferencia los generan sus endpoints)
+curl -X POST $HOST/api/inventario/movimientos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","tipo":"ajuste_positivo","cantidad":"1"}'
+
+# Listado con todos sus filtros
+curl $HOST/api/inventario/movimientos/ -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/movimientos/?producto_id=$PRODUCTO_ID&almacen_id=$ALMACEN_ID&tipo=entrada&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-60: ajuste positivo (el conteo físico encontró más de lo esperado)
+curl -X POST $HOST/api/inventario/ajustes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","motivo":"conteo_fisico","cantidad":"10"}'
+
+# Ajuste negativo (merma). La cantidad negativa resta.
+curl -X POST $HOST/api/inventario/ajustes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","motivo":"merma","cantidad":"-3"}'
+
+# motivo fuera del catálogo (conteo_fisico|merma|otro) -> 422 con campo:"motivo"
+curl -X POST $HOST/api/inventario/ajustes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","motivo":"robo","cantidad":"-1"}'
+
+# cantidad cero -> 422 con campo:"cantidad"
+curl -X POST $HOST/api/inventario/ajustes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_id":"'"$ALMACEN_ID"'","motivo":"otro","cantidad":"0"}'
+
+curl "$HOST/api/inventario/ajustes/?producto_id=$PRODUCTO_ID&almacen_id=$ALMACEN_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-61: transferencia entre almacenes (salida + entrada atómicas)
+curl -X POST $HOST/api/inventario/transferencias/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_origen_id":"'"$ALMACEN_ID"'","almacen_destino_id":"'"$ALMACEN_DESTINO_ID"'","cantidad":"5"}'
+
+# Mismo origen y destino -> 422 con campo:"almacen_destino_id"
+curl -X POST $HOST/api/inventario/transferencias/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"producto_id":"'"$PRODUCTO_ID"'","almacen_origen_id":"'"$ALMACEN_ID"'","almacen_destino_id":"'"$ALMACEN_ID"'","cantidad":"1"}'
+
+curl "$HOST/api/inventario/transferencias/?producto_id=$PRODUCTO_ID&almacen_origen_id=$ALMACEN_ID&almacen_destino_id=$ALMACEN_DESTINO_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-59 / RF-62 / RF-64: las tres consultas son vistas SQL. Exponen el sku y el
+# NOMBRE del almacén, no sus ids, pero aceptan ?producto_id= y ?almacen_id= y la
+# API los traduce. Un id bien formado que no existe -> página vacía, no 404.
+curl $HOST/api/inventario/stock-disponible/ -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/stock-disponible/?producto_id=$PRODUCTO_ID&almacen_id=$ALMACEN_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/inventario/kardex/ -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/kardex/?producto_id=$PRODUCTO_ID&tipo=entrada&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# El kardex además filtra por la clave natural, sin necesidad de ids
+curl "$HOST/api/inventario/kardex/?sku=LAP-001&almacen=Almacen%20Central" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl "$HOST/api/inventario/valuacion/?producto_id=$PRODUCTO_ID&almacen_id=$ALMACEN_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-63: alertas de stock mínimo. Las genera el trigger de inventario cuando un
+# movimiento deja el stock en o por debajo de stock_minimo; la API no las crea.
+curl "$HOST/api/inventario/alertas-stock-minimo/?notificada=false" -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/inventario/alertas-stock-minimo/?producto_id=$PRODUCTO_ID&almacen_id=$ALMACEN_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Marcar una alerta como notificada. El id es un ENTERO secuencial, no un UUID.
+curl -X POST "$HOST/api/inventario/alertas-stock-minimo/<alerta-id>/notificar/" \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# COMPRAS — PROVEEDORES Y UMBRAL (RF-45 / RF-46 / RF-52)
+###########################################################
+
+curl "$HOST/api/compras/proveedores/?search=REST&activo=true" -H "Authorization: Bearer $TOKEN"
+
+curl -X POST $HOST/api/compras/proveedores/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rfc_o_id_fiscal":"RFC-OC-001","razon_social":"Proveedor REST","correo":"proveedor@test.com","telefono":"7777777777"}'
+
+PROVEEDOR_ID="<id-del-proveedor>"
+
+curl -X PATCH $HOST/api/compras/proveedores/$PROVEEDOR_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"telefono":"9999999999"}'
+
+# Baja lógica incondicional (a diferencia del cliente, que se bloquea con saldo
+# en CxC): sus órdenes y CxP se conservan intactas.
+curl -X DELETE $HOST/api/compras/proveedores/$PROVEEDOR_ID/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-52: umbral que decide si una orden nace "enviada" o "pendiente_aprobacion"
+curl $HOST/api/compras/config-aprobacion/ -H "Authorization: Bearer $TOKEN"
+
+curl -X PATCH $HOST/api/compras/config-aprobacion/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"umbral_monto":"500"}'
+
+# PUT es alias de PATCH
+curl -X PUT $HOST/api/compras/config-aprobacion/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"umbral_monto":"500"}'
+
+# Umbral negativo -> 422 con campo:"umbral_monto"
+curl -X PATCH $HOST/api/compras/config-aprobacion/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"umbral_monto":"-1"}'
+
+###########################################################
+# COMPRAS — ÓRDENES, RECEPCIONES Y CxP (RF-47 a RF-51)
+###########################################################
+
+# RF-47/RF-48: total 100, dentro del umbral (500) -> estado "enviada"
+curl -X POST $HOST/api/compras/ordenes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"proveedor_id":"'"$PROVEEDOR_ID"'","lineas":[{"producto_id":"'"$PRODUCTO_ID"'","cantidad":"10","costo_unitario":"10"}]}'
+
+ORDEN_ID="<id-de-la-orden>"
+ORDEN_LINEA_ID="<id-de-la-linea-de-la-orden>"
+
+# Total 10000, excede el umbral -> estado "pendiente_aprobacion"
+curl -X POST $HOST/api/compras/ordenes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"proveedor_id":"'"$PROVEEDOR_ID"'","lineas":[{"producto_id":"'"$PRODUCTO_ID"'","cantidad":"1000","costo_unitario":"10"}]}'
+
+# Sin líneas -> 422 con campo:"lineas"
+curl -X POST $HOST/api/compras/ordenes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"proveedor_id":"'"$PROVEEDOR_ID"'","lineas":[]}'
+
+curl "$HOST/api/compras/ordenes/?estado=pendiente_aprobacion&proveedor_id=$PROVEEDOR_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/compras/ordenes/$ORDEN_ID/ -H "Authorization: Bearer $TOKEN"
+
+# Aprobación manual (stand-in del motor de aprobaciones, aún no implementado):
+# pendiente_aprobacion -> enviada
+curl -X PATCH "$HOST/api/compras/ordenes/<orden-pendiente-id>/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"estado":"enviada"}'
+
+# Transición de estado no permitida -> 422 con campo:"estado"
+curl -X PATCH $HOST/api/compras/ordenes/$ORDEN_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"estado":"recibida_total"}'
+
+# RF-49/RF-50: recepción parcial (6 de 10) -> la orden pasa a "recibida_parcial",
+# suma stock y crea la cuenta por pagar.
+# costo_unitario es opcional pero MÁNDALO: con él se recalcula el
+# costo_referencia del producto, y si se omite se toma 0.
+curl -X POST $HOST/api/compras/recepciones/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"orden_id":"'"$ORDEN_ID"'","almacen_id":"'"$ALMACEN_ID"'","lineas":[{"orden_compra_linea_id":"'"$ORDEN_LINEA_ID"'","cantidad":"6","costo_unitario":"11"}]}'
+
+# Excede lo pendiente (quedan 4) -> 422 con campo:"lineas[0].cantidad"
+curl -X POST $HOST/api/compras/recepciones/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"orden_id":"'"$ORDEN_ID"'","almacen_id":"'"$ALMACEN_ID"'","lineas":[{"orden_compra_linea_id":"'"$ORDEN_LINEA_ID"'","cantidad":"5","costo_unitario":"11"}]}'
+
+# Recibe el remanente (4) -> la orden pasa a "recibida_total"
+curl -X POST $HOST/api/compras/recepciones/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"orden_id":"'"$ORDEN_ID"'","almacen_id":"'"$ALMACEN_ID"'","lineas":[{"orden_compra_linea_id":"'"$ORDEN_LINEA_ID"'","cantidad":"4","costo_unitario":"11"}]}'
+
+curl "$HOST/api/compras/recepciones/?orden_id=$ORDEN_ID&almacen_id=$ALMACEN_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-50: las CxP que generaron esas recepciones
+curl "$HOST/api/compras/cuentas-por-pagar/?proveedor_id=$PROVEEDOR_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# El stock del producto ya refleja las dos recepciones (10 en total)
+curl "$HOST/api/inventario/stock-disponible/?producto_id=$PRODUCTO_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-48: una orden ya recibida_total no se puede cancelar -> 422
+curl -X POST $HOST/api/compras/ordenes/$ORDEN_ID/cancelar/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# Una orden sin recepciones sí se cancela por completo
+curl -X POST "$HOST/api/compras/ordenes/<orden-sin-recepciones-id>/cancelar/" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RF-51: historial completo del proveedor (órdenes + recepciones + CxP).
+# No está paginado: es la ficha completa.
+curl $HOST/api/compras/proveedores/$PROVEEDOR_ID/historial/ \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# VENTAS — CLIENTES (RF-26 a RF-29)
+###########################################################
+
+curl "$HOST/api/ventas/clientes/?search=REST&activo=true" -H "Authorization: Bearer $TOKEN"
+
+# Solo razon_social es obligatorio
+curl -X POST $HOST/api/ventas/clientes/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"rfc_o_id_fiscal":"RFC-CLI-001","razon_social":"Cliente REST","correo":"cliente@test.com","telefono":"5555555555","limite_credito":"5000"}'
+
+CLIENTE_ID="<id-del-cliente>"
+
+curl -X PATCH $HOST/api/ventas/clientes/$CLIENTE_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"telefono":"2222222222"}'
+
+# Baja lógica. Con saldo pendiente en CxC -> 422 con saldo_pendiente.
+curl -X DELETE $HOST/api/ventas/clientes/$CLIENTE_ID/ \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# VENTAS — OPORTUNIDADES (RF-30 a RF-33)
+###########################################################
+
+# Nace en etapa "prospeccion" / estado "abierta". La fecha estimada de cierre
+# no puede ser anterior a hoy.
+curl -X POST $HOST/api/ventas/oportunidades/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"cliente_id":"'"$CLIENTE_ID"'","nombre":"Venta trimestral","valor_estimado":"50000","fecha_cierre_estimada":"2026-12-31"}'
+
+OPORTUNIDAD_ID="<id-de-la-oportunidad>"
+
+# RF-31: pipeline kanban (conteo, valor total y ponderado por etapa)
+curl $HOST/api/ventas/oportunidades/pipeline/ -H "Authorization: Bearer $TOKEN"
+
+# RF-31: listado tabular. Solo las propias, salvo ventas:pipeline:ver_todo.
+# desde/hasta acotan por fecha_cierre_estimada.
+curl "$HOST/api/ventas/oportunidades/?estado=abierta&etapa=prospeccion&cliente_id=$CLIENTE_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl "$HOST/api/ventas/oportunidades/?responsable_id=<usuario-id>" -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/ventas/oportunidades/$OPORTUNIDAD_ID/ -H "Authorization: Bearer $TOKEN"
+
+# Editar: solo si está abierta, y solo el responsable (o con ver_todo)
+curl -X PATCH $HOST/api/ventas/oportunidades/$OPORTUNIDAD_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"nombre":"Venta trimestral (revisada)","valor_estimado":"65000"}'
+
+# RF-32: avanzar etapa. Solo a la SIGUIENTE de la secuencia
+# (prospeccion -> calificacion -> propuesta -> negociacion -> cierre);
+# saltar o retroceder -> 422.
+curl -X POST $HOST/api/ventas/oportunidades/$OPORTUNIDAD_ID/etapa/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"etapa":"calificacion"}'
+
+# RF-33: cerrar (terminal). Como perdida exige motivo del catálogo:
+# Precio | Competencia | Tiempo | Presupuesto | Sin respuesta | Otro
+curl -X POST $HOST/api/ventas/oportunidades/$OPORTUNIDAD_ID/cerrar/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"estado":"ganada"}'
+
+curl -X POST "$HOST/api/ventas/oportunidades/<otra-oportunidad-id>/cerrar/" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"estado":"perdida","motivo_perdida":"Precio"}'
+
+###########################################################
+# VENTAS — COTIZACIONES (RF-34 a RF-37)
+###########################################################
+
+# Precio del catálogo si no se manda precio_unitario; un ajuste manual exige
+# ventas:cotizaciones:ajustar_precio (403 si falta). Totales automáticos.
+curl -X POST $HOST/api/ventas/cotizaciones/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"cliente_id":"'"$CLIENTE_ID"'","oportunidad_id":"'"$OPORTUNIDAD_ID"'","descuento_pct":"10","vigente_hasta":"2026-12-31","lineas":[{"producto_id":"'"$PRODUCTO_ID"'","cantidad":"3"}]}'
+
+COTIZACION_ID="<id-de-la-cotizacion>"
+
+# RF-35: listado. ?vencida=true acota a las vencidas que aún no están aprobadas
+# ni rechazadas; desde/hasta acotan por created_at.
+curl "$HOST/api/ventas/cotizaciones/?cliente_id=$CLIENTE_ID&estado=borrador&vencida=true&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/ventas/cotizaciones/$COTIZACION_ID/ -H "Authorization: Bearer $TOKEN"
+
+# RF-36: editar solo en borrador o pendiente_aprobacion
+curl -X PATCH $HOST/api/ventas/cotizaciones/$COTIZACION_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"descuento_pct":"5"}'
+
+# RF-37: aprobar o rechazar. Una cotización vencida no se puede aprobar -> 422.
+curl -X POST $HOST/api/ventas/cotizaciones/$COTIZACION_ID/resolver/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"decision":"aprobar"}'
+
+###########################################################
+# VENTAS — PEDIDOS (RF-38 a RF-41)
+###########################################################
+
+# Desde una cotización aprobada ("cotizacion_id") o directo (cliente_id+lineas)
+curl -X POST $HOST/api/ventas/pedidos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"cotizacion_id":"'"$COTIZACION_ID"'"}'
+
+curl -X POST $HOST/api/ventas/pedidos/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"cliente_id":"'"$CLIENTE_ID"'","lineas":[{"producto_id":"'"$PRODUCTO_ID"'","cantidad":"3"}]}'
+
+PEDIDO_ID="<id-del-pedido>"
+
+curl "$HOST/api/ventas/pedidos/?cliente_id=$CLIENTE_ID&estado=borrador&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/ventas/pedidos/$PEDIDO_ID/ -H "Authorization: Bearer $TOKEN"
+
+# Editar líneas: solo en borrador
+curl -X PATCH $HOST/api/ventas/pedidos/$PEDIDO_ID/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"lineas":[{"producto_id":"'"$PRODUCTO_ID"'","cantidad":"5"}]}'
+
+# RF-38: confirmar reserva stock en el almacén y valida el límite de crédito.
+# Si excede el crédito, añade "autorizar_credito":true (exige
+# finanzas:credito:autorizar, 403 si falta). Sin stock y con backorder el pedido
+# queda en "pendiente_surtido".
+curl -X POST $HOST/api/ventas/pedidos/$PEDIDO_ID/confirmar/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"almacen_id":"'"$ALMACEN_ID"'"}'
+
+curl -X POST $HOST/api/ventas/pedidos/$PEDIDO_ID/confirmar/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"almacen_id":"'"$ALMACEN_ID"'","autorizar_credito":true}'
+
+# RF-41: cancelar libera el stock reservado. Un pedido con facturas -> 422
+# (para eso está la nota de crédito).
+curl -X POST $HOST/api/ventas/pedidos/$PEDIDO_ID/cancelar/ \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# VENTAS — FACTURAS Y NOTAS DE CRÉDITO (RF-42 a RF-44)
+###########################################################
+
+# RF-42: sin "lineas" factura todo lo pendiente y reservado. Descuenta stock
+# (salida) y crea la cuenta por cobrar.
+curl -X POST $HOST/api/ventas/facturas/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pedido_id":"'"$PEDIDO_ID"'"}'
+
+FACTURA_ID="<id-de-la-factura>"
+
+# Factura parcial: solo las líneas y cantidades indicadas
+curl -X POST $HOST/api/ventas/facturas/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pedido_id":"'"$PEDIDO_ID"'","lineas":[{"pedido_linea_id":"<pedido-linea-id>","cantidad":"1"}]}'
+
+# RF-43: listado y detalle. desde/hasta acotan por fecha_emision.
+curl "$HOST/api/ventas/facturas/?cliente_id=$CLIENTE_ID&estado=emitida&pedido_id=$PEDIDO_ID&desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl $HOST/api/ventas/facturas/$FACTURA_ID/ -H "Authorization: Bearer $TOKEN"
+
+# RF-44: nota de crédito. Revierte la CxC; el monto debe ser > 0 y <= saldo.
+# Una NC total con reingresar_stock:true devuelve el stock facturado. La factura
+# queda en "con_nota_credito".
+curl -X POST $HOST/api/ventas/facturas/$FACTURA_ID/nota-credito/ \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"motivo":"Devolucion total","monto":"3364.00","reingresar_stock":true}'
+
+###########################################################
+# VENTAS — REPORTES (RV-01 a RV-06)
+#
+# Los seis exigen ventas:reportes:leer. Con ?formato=csv|pdf devuelven el
+# archivo completo y exigen ADEMÁS ventas:reportes:exportar (403 si falta).
+# desde/hasta son obligatorios (400 si faltan) y el rango no puede pasar de
+# 366 días (422). Los importes son decimales en string: parséalos con una
+# librería decimal, nunca como float.
+#
+# ?vendedor_id= solo lo respeta quien tiene ventas:pipeline:ver_todo; sin ese
+# permiso el reporte se acota siempre al propio usuario y la respuesta lo dice
+# en alcance_vendedor. Ver docs/api/FLUJO-VENTAS-REPORTES.md.
+###########################################################
+
+# RV-01: facturación agregada. venta_neta = facturado - notas de crédito.
+# Una NC se imputa al periodo de SU fecha, no al de la factura que corrige.
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-12-31&agrupar=mes" \
+  -H "Authorization: Bearer $TOKEN"
+
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/?desde=2026-07-01&hasta=2026-07-31&agrupar=dia&cliente_id=$CLIENTE_ID" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RV-02: top de clientes por venta neta o por volumen. Los totales agregan TODOS
+# los clientes del rango, no solo el top: cambiar limit no cambia los totales.
+curl "$HOST/api/ventas/reportes/clientes/?desde=2026-01-01&hasta=2026-12-31&orden=monto&limit=10" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RV-03: top de productos. OJO: importe BRUTO. Una nota de crédito no tiene
+# desglose por línea, así que las devoluciones NO se descuentan aquí (por eso no
+# cuadra con RV-01); la respuesta lo declara en el campo "nota".
+curl "$HOST/api/ventas/reportes/productos/?desde=2026-01-01&hasta=2026-12-31&orden=cantidad&limit=20" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RV-04: embudo. Cada etapa cuenta documentos CREADOS en el rango (flujo del
+# periodo, no foto del estado actual) y la conversión es respecto de la etapa
+# anterior, no un seguimiento documento a documento.
+curl "$HOST/api/ventas/reportes/embudo/?desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RV-05: cartera a una fecha de corte (no usa rango; por defecto hoy). El saldo
+# se reconstruye A ESA FECHA. La antigüedad son días DESDE LA EMISIÓN, no días
+# vencidos: el esquema no modela fecha de vencimiento ni días de crédito.
+curl "$HOST/api/ventas/reportes/cartera/?corte=2026-07-31" -H "Authorization: Bearer $TOKEN"
+
+# Con el detalle factura a factura (paginado)
+curl "$HOST/api/ventas/reportes/cartera/?corte=2026-07-31&detalle=true&page=1&page_size=20" \
+  -H "Authorization: Bearer $TOKEN"
+
+# RV-06: desempeño por vendedor. La fila con vendedor_id:null ("Sin asignar")
+# son documentos sin atribución; nunca se reparten entre los vendedores reales.
+curl "$HOST/api/ventas/reportes/vendedores/?desde=2026-01-01&hasta=2026-12-31" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Exportación (se audita como evento EXPORT)
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-12-31&formato=csv" \
+  -H "Authorization: Bearer $TOKEN" -o ventas-por-periodo.csv
+
+curl "$HOST/api/ventas/reportes/clientes/?desde=2026-01-01&hasta=2026-12-31&formato=pdf" \
+  -H "Authorization: Bearer $TOKEN" -o clientes.pdf
+
+# Errores esperados de los reportes
+# 400: faltan desde/hasta
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/" -H "Authorization: Bearer $TOKEN"
+
+# 400: agrupar fuera del catálogo (dia|semana|mes)
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/?desde=2026-01-01&hasta=2026-01-31&agrupar=trimestre" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 422: rango mayor a 366 días
+curl "$HOST/api/ventas/reportes/ventas-por-periodo/?desde=2024-01-01&hasta=2026-01-01" \
+  -H "Authorization: Bearer $TOKEN"
+
+###########################################################
+# PARÁMETROS MAL FORMADOS -> 400 (no 500)
+#
+# Un filtro mal escrito responde 400 con "campo", en cualquier endpoint. Se
+# distingue del 422 (petición bien formada que rompe una regla de negocio).
+# Un id BIEN formado que no existe no es un error: devuelve página vacía, para
+# no revelar qué existe en otros tenants.
+###########################################################
+
+# UUID que no es UUID
+curl "$HOST/api/ventas/facturas/?cliente_id=no-es-un-uuid" -H "Authorization: Bearer $TOKEN"
+
+# Valor fuera del ENUM (el mensaje enumera los válidos)
+curl "$HOST/api/inventario/movimientos/?tipo=inventado" -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/compras/ordenes/?estado=inventado" -H "Authorization: Bearer $TOKEN"
+
+# Fecha que no es fecha
+curl "$HOST/api/core/bitacora/?desde=ayer" -H "Authorization: Bearer $TOKEN"
+
+# orden y formato fuera del catálogo
+curl "$HOST/api/core/usuarios/?orden=inventado" -H "Authorization: Bearer $TOKEN"
+curl "$HOST/api/core/bitacora/export/?formato=xml" -H "Authorization: Bearer $TOKEN"
+
+# UUID válido que no existe -> 200 con results vacío
+curl "$HOST/api/inventario/stock-disponible/?producto_id=00000000-0000-0000-0000-000000000000" \
+  -H "Authorization: Bearer $TOKEN"
 
 ###########################################################
 # PRUEBAS DE SEGURIDAD
 ###########################################################
 
-# Aprobado 🟩
-GET {{host}}/api/core/me/
-
-###
-
-# Aprobado 🟩
-GET {{host}}/api/inventario/productos/
-Authorization: Bearer token_invalido
-
-###
-
-# Aprobado 🟩
-POST {{host}}/api/auth/login/
-Content-Type: application/json
-
-{
-    "tenant_slug":"acme",
-    "correo":"admin@acme.com",
-    "password":"incorrecta"
-}
-
-###
-
-###########################################################
-# PORTAL DE PLATAFORMA — SESION DEL SYSADMIN
-# Fundacion de auth del Administrador Global (fuera de todo tenant).
-# Habilita RF-01..04. Superficie separada de la de tenant:
-#   · token con typ="sysadmin", sesion en core.sesion_sysadmin
-#   · login de UNA fase, sin MFA por ahora (decision aprobada)
-#
-# REQUISITO PREVIO: sembrar el primer SysAdmin (no hay ninguno por defecto):
-#   SYSADMIN_EMAIL="root@novaerp.local" SYSADMIN_PASSWORD="PlataformaSegura2026!" \
-#     python manage.py crear_sysadmin
-# Ajusta las variables de abajo si usaste otras credenciales.
-###########################################################
-
-@adminEmail = root@novaerp.local
-@adminPassword = PlataformaSegura2026!
-
-# 1) LOGIN correcto (una fase) -> 200 + token de plataforma. Guarda adminToken.
-POST {{host}}/api/admin/login/
-Content-Type: application/json
-
-{
-  "correo": "{{adminEmail}}",
-  "password": "{{adminPassword}}"
-}
-
-> {%
-const body = response.parsedBody;
-client.global.set("adminToken", body.token);
-%}
-
-###
-
-# 2) LOGIN password incorrecta -> 401 (se audita LOGIN_FAILED, no se cuenta:
-#    sin bloqueo por ahora)
-POST {{host}}/api/admin/login/
-Content-Type: application/json
-
-{
-  "correo": "{{adminEmail}}",
-  "password": "incorrecta"
-}
-
-###
-
-# 3) LOGIN correo inexistente -> 401 (no revela existencia; se audita el correo
-#    intentado)
-POST {{host}}/api/admin/login/
-Content-Type: application/json
-
-{
-  "correo": "noexiste@novaerp.local",
-  "password": "loquesea1234"
-}
-
-###
-
-# 4) Endpoint protegido de plataforma CON token de sysadmin -> 200 (logout)
-#    Cierra la sesion en curso; el mismo token queda revocado de inmediato.
-POST {{host}}/api/admin/logout/
-Authorization: Bearer {{adminToken}}
-
-###
-
-# 5) Reusar el token DESPUES del logout -> 401 (sesion revocada; idempotente)
-POST {{host}}/api/admin/logout/
-Authorization: Bearer {{adminToken}}
-
-###
-
-# 6) Endpoint protegido de plataforma SIN token -> 401
-POST {{host}}/api/admin/logout/
-
-###
-
-# 7) AISLAMIENTO: token de sysadmin en un endpoint de tenant (/me) -> 401
-#    (un SysAdmin no es un usuario de tenant). Vuelve a hacer login (paso 1)
-#    para tener un adminToken vivo antes de probar esto.
-GET {{host}}/api/core/me/
-Authorization: Bearer {{adminToken}}
-
-###
-
-# 8) AISLAMIENTO inverso: token de TENANT en el endpoint de plataforma -> 401
-#    (usa {{token}} del login de tenant de dos fases de mas arriba)
-POST {{host}}/api/admin/logout/
-Authorization: Bearer {{token}}
-
-###
-
-###########################################################
-# MODULO 1 — ADMINISTRACION DE MULTI-TENENCIA (RF-01..RF-04)
-# Todo el bloque exige una sesion de SysAdmin: haz primero el login del portal
-# (seccion anterior, paso 1) para tener {{adminToken}} vivo.
-###########################################################
-
-@nuevoSlug = probadora
-@nuevoAdminCorreo = jefa@probadora.com
-
-# RF-01: registrar un tenant. Nace 'pendiente'; devuelve el token de activacion
-# (en dev; el worker de correo lo entrega al admin inicial). Guarda id y token.
-POST {{host}}/api/admin/tenants/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "slug": "{{nuevoSlug}}",
-  "razon_social": "Probadora SA de CV",
-  "dominio_comercial": "Servicios",
-  "correo": "{{nuevoAdminCorreo}}",
-  "nombre_completo": "Jefa Probadora",
-  "plan": "STARTER"
-}
-
-> {%
-const b = response.parsedBody;
-client.global.set("tenantId", b.id);
-client.global.set("activacionTenantToken", b.activacion_token);
-%}
-
-###
-
-# RF-01/CA10: dominio reservado -> 422 "Este dominio esta reservado..."
-POST {{host}}/api/admin/tenants/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "slug": "admin",
-  "razon_social": "Reservada SA",
-  "correo": "x@reservada.com",
-  "nombre_completo": "X",
-  "plan": "BUSINESS"
-}
-
-###
-
-# RF-01/RN04: correo ya usado en la plataforma (admin@acme.com) -> 422
-POST {{host}}/api/admin/tenants/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "slug": "otra-org",
-  "razon_social": "Otra Org SA",
-  "correo": "admin@acme.com",
-  "nombre_completo": "X",
-  "plan": "BUSINESS"
-}
-
-###
-
-# RF-01 flujo de activacion (PUBLICO, sin token de sesion): el admin inicial fija
-# su contrasena; en cascada el usuario Y el tenant pasan a 'activo'.
-POST {{host}}/api/auth/activar-tenant/
-Content-Type: application/json
-
-{
-  "token": "{{activacionTenantToken}}",
-  "password": "ClaveSegura2026"
-}
-
-###
-
-# RF-02: listar tenants (paginado, filtros ?estado= ?plan= ?search= ?orden= ?desc=)
-GET {{host}}/api/admin/tenants/?search=probadora&orden=created_at&desc=true
-Authorization: Bearer {{adminToken}}
-
-###
-
-# RF-02/CA05: detalle de un tenant (modulos activos, licencias)
-GET {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-
-###
-
-# RF-03: editar datos generales (renombrar). No afecta datos existentes.
-PATCH {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "razon_social": "Probadora Renombrada SA"
-}
-
-###
-
-# RF-03/CA08: activar un modulo cuya dependencia no esta activa -> 422
-# (STARTER trae INVENTARIO; VENTAS no esta en STARTER -> primero falla por plan)
-PATCH {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "modulos": { "activar": ["VENTAS"] }
-}
-
-###
-
-# RF-03: subir a BUSINESS (incluye ventas/compras) y activar VENTAS (su
-# dependencia INVENTARIO ya esta activa). Dos cambios en un PATCH.
-PATCH {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "plan": "BUSINESS",
-  "modulos": { "activar": ["VENTAS"] }
-}
-
-###
-
-# RF-03/RN07/CA09: desactivar INVENTARIO (del que depende VENTAS) SIN cascada
-# -> 422 con requiere_confirmar_cascada=true y la lista de modulos_afectados.
-PATCH {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "modulos": { "desactivar": ["INVENTARIO"] }
-}
-
-###
-
-# RF-03: la misma desactivacion CON confirmacion de cascada -> 200
-# (apaga INVENTARIO y sus dependientes en un solo proceso atomico).
-PATCH {{host}}/api/admin/tenants/{{tenantId}}/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "modulos": { "desactivar": ["INVENTARIO"] },
-  "confirmar_cascada": true
-}
-
-###
-
-# RF-04: suspender el tenant (tipo cumplimiento/administrativa + motivo).
-# Invalida todas las sesiones de sus usuarios y bloquea su login.
-POST {{host}}/api/admin/tenants/{{tenantId}}/suspender/
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "tipo": "administrativa",
-  "motivo": "Impago del periodo"
-}
-
-###
-
-# RF-04/RN05: reactivar el tenant suspendido (sin perdida de informacion)
-POST {{host}}/api/admin/tenants/{{tenantId}}/reactivar/
-Authorization: Bearer {{adminToken}}
-
-###
-
-# RF-04: dar de baja logica (?baja=true). Reversible con reactivar.
-POST {{host}}/api/admin/tenants/{{tenantId}}/suspender/?baja=true
-Authorization: Bearer {{adminToken}}
-Content-Type: application/json
-
-{
-  "tipo": "administrativa",
-  "motivo": "Cierre de cuenta"
-}
-
-###
-
-###########################################################
-# MODULO 8 — VENTAS / CRM TRANSACCIONAL (RF-30..RF-44)
-# Requiere un usuario de tenant autenticado (login de dos fases de arriba,
-# {{token}}) con permisos de ventas. El TENANT_ADMIN (admin@acme.com) los tiene
-# todos por bypass. Usa un producto y almacen existentes del tenant acme.
-###########################################################
-
-@ventasToken = {{token}}
-@clienteVentas = REEMPLAZA_CON_UN_CLIENTE_ID
-@productoVentas = REEMPLAZA_CON_UN_PRODUCTO_ID
-@almacenVentas = REEMPLAZA_CON_UN_ALMACEN_ID
-
-# --- RF-30..33 Oportunidades ---
-
-# RF-30: registrar oportunidad (nace en 'prospeccion'/'abierta')
-POST {{host}}/api/ventas/oportunidades/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{
-  "cliente_id": "{{clienteVentas}}",
-  "nombre": "Venta trimestral",
-  "valor_estimado": "50000",
-  "fecha_cierre_estimada": "2026-12-31"
-}
-
-> {%
-client.global.set("oportunidadId", response.parsedBody.id);
-%}
-
-###
-
-# RF-31: pipeline kanban (conteo, valor total y ponderado por etapa)
-GET {{host}}/api/ventas/oportunidades/pipeline/
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# RF-31: listado tabular (solo propias salvo ventas:pipeline:ver_todo)
-GET {{host}}/api/ventas/oportunidades/?estado=abierta
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# RF-32: avanzar la etapa (solo a la siguiente en la secuencia)
-POST {{host}}/api/ventas/oportunidades/{{oportunidadId}}/etapa/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "etapa": "calificacion" }
-
-###
-
-# RF-33: cerrar como perdida (motivo del catalogo obligatorio) o ganada
-POST {{host}}/api/ventas/oportunidades/{{oportunidadId}}/cerrar/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "estado": "ganada" }
-
-###
-
-# --- RF-34..37 Cotizaciones ---
-
-# RF-34: generar cotizacion (precio del catalogo; totales automaticos)
-POST {{host}}/api/ventas/cotizaciones/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{
-  "cliente_id": "{{clienteVentas}}",
-  "descuento_pct": "10",
-  "vigente_hasta": "2026-12-31",
-  "lineas": [
-    { "producto_id": "{{productoVentas}}", "cantidad": "3" }
-  ]
-}
-
-> {%
-client.global.set("cotizacionId", response.parsedBody.id);
-%}
-
-###
-
-# RF-35: listar cotizaciones (?estado= ?cliente_id= ?vencida=true ?desde=&hasta=)
-GET {{host}}/api/ventas/cotizaciones/
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# RF-36: editar cotizacion (solo borrador / pendiente_aprobacion)
-PATCH {{host}}/api/ventas/cotizaciones/{{cotizacionId}}/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "descuento_pct": "5" }
-
-###
-
-# RF-37: aprobar / rechazar (una vencida no se aprueba)
-POST {{host}}/api/ventas/cotizaciones/{{cotizacionId}}/resolver/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "decision": "aprobar" }
-
-###
-
-# --- RF-38..41 Pedidos ---
-
-# RF-38: crear pedido (desde cotizacion aprobada -> "cotizacion_id", o directo)
-POST {{host}}/api/ventas/pedidos/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{
-  "cliente_id": "{{clienteVentas}}",
-  "lineas": [
-    { "producto_id": "{{productoVentas}}", "cantidad": "3" }
-  ]
-}
-
-> {%
-client.global.set("pedidoId", response.parsedBody.id);
-%}
-
-###
-
-# RF-38: confirmar (reserva stock en el almacen; valida limite de credito).
-# Si excede el credito, agrega "autorizar_credito": true (requiere permiso
-# finanzas:credito:autorizar). Sin stock y con backorder -> pendiente_surtido.
-POST {{host}}/api/ventas/pedidos/{{pedidoId}}/confirmar/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "almacen_id": "{{almacenVentas}}" }
-
-###
-
-# RF-39: listar pedidos
-GET {{host}}/api/ventas/pedidos/?estado=confirmado
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# RF-41: cancelar pedido (libera el stock reservado). Un pedido facturado -> 422
-POST {{host}}/api/ventas/pedidos/{{pedidoId}}/cancelar/
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# --- RF-42..44 Facturas y Notas de Credito ---
-
-# RF-42: generar factura de un pedido confirmado (parcial o total). Sin "lineas"
-# factura todo lo pendiente y reservado. Descuenta stock (salida) y crea la CxC.
-POST {{host}}/api/ventas/facturas/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{ "pedido_id": "{{pedidoId}}" }
-
-> {%
-client.global.set("facturaId", response.parsedBody.id);
-%}
-
-###
-
-# RF-43: listar / consultar facturas
-GET {{host}}/api/ventas/facturas/?cliente_id={{clienteVentas}}
-Authorization: Bearer {{ventasToken}}
-
-###
-
-# RF-44: nota de credito (revierte CxC; NC total con reingresar_stock=true
-# reingresa el stock facturado). La factura queda 'con_nota_credito'.
-POST {{host}}/api/ventas/facturas/{{facturaId}}/nota-credito/
-Authorization: Bearer {{ventasToken}}
-Content-Type: application/json
-
-{
-  "motivo": "Devolucion total",
-  "monto": "3364.00",
-  "reingresar_stock": true
-}
+# Sin cabecera Authorization -> 401
+curl $HOST/api/core/me/
+
+# Token que no es un JWT válido -> 401
+curl $HOST/api/inventario/productos/ -H "Authorization: Bearer token_invalido"
+
+# JWT fabricado a mano -> 401. El middleware exige las claims sub/tid/jti Y una
+# sesión viva en core.sesion: firmar un token no basta.
+curl $HOST/api/core/me/ -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.e30.x"
+
+# Aislamiento entre tenants: un id de otro tenant se comporta como inexistente
+# (404 en el detalle, página vacía en los listados), nunca como 403.
+curl "$HOST/api/ventas/oportunidades/<id-de-otro-tenant>/" -H "Authorization: Bearer $TOKEN"
+
+# Los catálogos (clientes, productos, almacenes, proveedores) NO tienen GET de
+# detalle: solo listado, PATCH y DELETE. Un GET ahí responde 403, no 404 ni 405:
+# el mixin de autorización falla cerrado, y un método que no declara permiso se
+# rechaza en vez de dejarse pasar.
+curl $HOST/api/ventas/clientes/$CLIENTE_ID/ -H "Authorization: Bearer $TOKEN"

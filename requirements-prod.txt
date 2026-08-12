@@ -1,0 +1,21 @@
+# --- Aplicación ---
+Django==6.0.7
+django-cors-headers==4.9.0
+psycopg==3.3.4
+psycopg-binary==3.3.4
+python-dotenv==1.2.2
+PyJWT==2.13.0
+cryptography==49.0.0
+reportlab==5.0.0
+pillow==12.3.0          # reportlab lo necesita para imágenes en los PDF
+
+# --- Servidor de aplicación (B2) ---
+gunicorn==23.0.0        # Linux
+# waitress==3.0.2       # Windows (gunicorn no corre en Windows)
+
+# --- Transitivas fijadas ---
+asgiref==3.11.1
+sqlparse==0.5.5
+tzdata==2026.3
+cffi==2.1.0
+pycparser==3.0

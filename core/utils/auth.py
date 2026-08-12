@@ -2,6 +2,8 @@ from functools import wraps
 
 from django.http import JsonResponse
 
+from core.utils.errors import ParametroInvalido
+
 UNAUTHORIZED = {"detail": "No autorizado o sesion expirada"}
 
 # La autorizacion vive en core/utils/permissions.py y se resuelve por codigo
@@ -37,12 +39,20 @@ class LoginRequiredMixin:
 
     Debe ir a la izquierda de View en la lista de bases para que su
     dispatch() se ejecute primero.
+
+    Ademas de exigir la sesion, es el punto unico donde ParametroInvalido se
+    traduce a 400: por aqui pasan todas las vistas de tenant (directamente o via
+    PermissionRequiredMixin), asi que un filtro mal formado responde 400 tambien
+    en los endpoints que se escriban despues, sin que cada uno lo recuerde.
     """
 
     def dispatch(self, request, *args, **kwargs):
         if not _is_authenticated(request):
             return JsonResponse(UNAUTHORIZED, status=401)
-        return super().dispatch(request, *args, **kwargs)
+        try:
+            return super().dispatch(request, *args, **kwargs)
+        except ParametroInvalido as e:
+            return JsonResponse(e.to_dict(), status=400)
 
 
 class SysAdminRequiredMixin:
@@ -59,7 +69,10 @@ class SysAdminRequiredMixin:
     def dispatch(self, request, *args, **kwargs):
         if not getattr(request, "sysadmin_id", None):
             return JsonResponse(UNAUTHORIZED, status=401)
-        return super().dispatch(request, *args, **kwargs)
+        try:
+            return super().dispatch(request, *args, **kwargs)
+        except ParametroInvalido as e:
+            return JsonResponse(e.to_dict(), status=400)
 
 
 def tenant_scoped(queryset, request, lookup="tenant__slug"):

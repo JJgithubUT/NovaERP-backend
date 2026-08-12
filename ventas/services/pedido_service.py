@@ -7,12 +7,14 @@ from django.utils import timezone
 from core.utils.audit import audit_context
 from core.utils.auth import get_tenant
 from core.utils.errors import BusinessRuleError
+from core.utils import filtros
 from core.utils.permissions import exigir_permiso
 from core.utils.pagination import paginate
 from inventario.models import Almacen, Producto
 from ventas.models import (
     Cliente, ConfigVentas, Cotizacion, CotizacionLinea, PedidoLinea, PedidoVenta,
 )
+from ventas.services.atribucion import resolver_vendedor
 
 PERMISO_AUTORIZAR_CREDITO = "finanzas:credito:autorizar"
 
@@ -53,6 +55,7 @@ def serialize_pedido(p):
         "cliente_id": str(p.cliente_id),
         "cotizacion_id": str(p.cotizacion_id) if p.cotizacion_id else None,
         "almacen_id": str(p.almacen_id) if p.almacen_id else None,
+        "vendedor_id": str(p.vendedor_id) if p.vendedor_id else None,
         "estado": p.estado,
         "total": str(p.total),
         "lineas": [{
@@ -133,6 +136,12 @@ def crear_pedido(data, request):
         pedido = PedidoVenta.objects.create(
             id=uuid.uuid4(), tenant=tenant, folio=_generar_folio(tenant), cliente=cliente,
             cotizacion=cotizacion, estado="borrador", total=total, almacen=None,
+            # RN-06: hereda el vendedor de la cotizacion de origen; en un pedido
+            # directo la atribucion es del actor.
+            vendedor_id=resolver_vendedor(
+                data, request, tenant,
+                heredado=cotizacion.vendedor_id if cotizacion else None,
+            ),
             created_at=now, updated_at=now,
         )
         PedidoLinea.objects.bulk_create([
@@ -239,11 +248,11 @@ def listar_pedidos(request):
     """RF-39: listado paginado con filtros por cliente, estado y rango de fecha."""
     tenant = get_tenant(request)
     qs = PedidoVenta.objects.filter(tenant=tenant)
-    for campo in ("cliente_id", "estado"):
-        val = request.GET.get(campo)
-        if val:
-            qs = qs.filter(**{campo: val})
-    desde, hasta = request.GET.get("desde"), request.GET.get("hasta")
+    for campo, val in filtros.filtros_validados(
+        PedidoVenta, request, ("cliente_id", "estado")
+    ).items():
+        qs = qs.filter(**{campo: val})
+    desde, hasta = filtros.rango_validado(request)
     if desde:
         qs = qs.filter(created_at__gte=desde)
     if hasta:

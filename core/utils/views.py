@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from core.models import Tenant
 from core.utils.auth import UNAUTHORIZED, get_tenant, tenant_scoped
 from core.utils.errors import BusinessRuleError
+from core.utils.filtros import rango_validado, validar_filtro
 from core.utils.pagination import paginate
 from core.utils.permissions import PermissionDeniedError, PermissionRequiredMixin
 
@@ -19,15 +20,19 @@ TRUE_VALUES = {"1", "true", "si", "sí"}
 def _apply_filters(qs, request, filter_fields, date_field):
     """Filtros exactos ?<campo>=valor por cada entrada de filter_fields, mas
     un rango ?desde=&hasta= sobre date_field si esta definido. Compartido
-    entre ListCreateView y ReadOnlyListView."""
+    entre ListCreateView y ReadOnlyListView.
+
+    Cada valor se valida antes de entrar al queryset (ver core.utils.filtros):
+    sin eso, un uuid mal escrito o un valor fuera del ENUM abortan la consulta
+    en Postgres y la vista responde 500 en vez de 400.
+    """
     for field in filter_fields:
         value = request.GET.get(field)
         if value:
-            qs = qs.filter(**{field: value})
+            qs = qs.filter(**{field: validar_filtro(qs.model, field, value)})
 
     if date_field:
-        desde = request.GET.get("desde")
-        hasta = request.GET.get("hasta")
+        desde, hasta = rango_validado(request)
         if desde:
             qs = qs.filter(**{f"{date_field}__gte": desde})
         if hasta:
@@ -213,6 +218,13 @@ class ReadOnlyListView(PermissionRequiredMixin, View):
     date_field = None
     tenant_via_id = False
 
+    def filtrar_extra(self, qs, request):
+        """Gancho para filtros que no son una igualdad directa sobre una
+        columna. Lo usan las vistas SQL cuyas columnas no coinciden con lo que
+        manda el cliente (ver inventario.views.FiltroPorIdMixin). Por defecto no
+        toca el queryset."""
+        return qs
+
     def get(self, request):
         try:
             if self.tenant_via_id:
@@ -224,4 +236,5 @@ class ReadOnlyListView(PermissionRequiredMixin, View):
 
         qs = qs.order_by(*self.ordering)
         qs = _apply_filters(qs, request, self.filter_fields, self.date_field)
+        qs = self.filtrar_extra(qs, request)
         return JsonResponse(paginate(qs, request, self.serialize_fn))

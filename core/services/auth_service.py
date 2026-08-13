@@ -5,7 +5,7 @@ from django.conf import settings
 from django.db import connection
 from django.utils import timezone
 
-from core.models import LogAuditoria, Usuario
+from core.models import LogAuditoria, Tenant, Usuario
 from core.services import notificacion_service
 from core.services import session_service
 from core.utils import secretos, totp
@@ -191,18 +191,24 @@ def validar_otp(request, reto, codigo):
     ip = client_ip(request)
     payload = _leer_reto(reto)
 
-    usuario = (
-        Usuario.objects.select_related("tenant").filter(id=payload.get("sub")).first()
-    )
-    if usuario is None:
+    # El tenant sale del propio JWT (no de una consulta a core.usuario) porque
+    # esa tabla tiene RLS: bajo el rol restringido de produccion, buscar al
+    # usuario antes de fijar app.current_tenant_id siempre devuelve vacio (la
+    # politica tenant_isolation lo filtra), aunque el codigo sea correcto.
+    tenant = Tenant.objects.filter(slug=payload.get("tid")).first()
+    if tenant is None:
         raise LoginError("El reto de verificacion es invalido o expiro.")
-    tenant = usuario.tenant
 
     error = None
     token = None
     mensaje_ok = None
 
     with audit_context(request, tenant_id=tenant.id):
+        usuario = (
+            Usuario.objects.select_related("tenant").filter(id=payload.get("sub")).first()
+        )
+        if usuario is None:
+            raise LoginError("El reto de verificacion es invalido o expiro.")
         set_audit_user(usuario.id)
 
         # El bloqueo pudo dispararse entre fases (o durante los reintentos de

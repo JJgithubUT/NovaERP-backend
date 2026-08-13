@@ -1,0 +1,3 @@
+curl -sS -X POST https://novaerp-backend-jwan.onrender.com/api/admin/login/ \
+  -H 'Content-Type: application/json' \
+  -d '{"correo":"juanjcbreton@gmail.com","password":"ju@n1234567890"}'

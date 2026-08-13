@@ -7,6 +7,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.core.validators import validate_email
 from django.db import connection
 
+from core.utils.audit import sysadmin_context
+
 # Bootstrap del primer SysAdmin (Administrador Global). No hay ninguno sembrado
 # en el esquema, asi que sin este comando no se puede acceder al portal de
 # plataforma (ni, mas adelante, ejecutar RF-01..04).
@@ -96,18 +98,25 @@ class Command(BaseCommand):
             return cursor.fetchone() is not None
 
     def _crear(self, correo, password):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "INSERT INTO core.sysadmin (correo, password_hash, activo) "
-                "VALUES (%s, crypt(%s, gen_salt('bf', 12)), TRUE)",
-                [correo, password],
-            )
+        # INSERT en core.sysadmin dispara trg_auditar_sysadmin (fn_auditar), que
+        # escribe en core.log_auditoria. Esa tabla tiene RLS: sin
+        # sysadmin_context (que fija app.is_sysadmin='true'), el INSERT del
+        # trigger viola la politica para cualquier rol que no sea superusuario
+        # -- exactamente el rol restringido que exige DESPLIEGUE.md §3.2.
+        with sysadmin_context(None):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO core.sysadmin (correo, password_hash, activo) "
+                    "VALUES (%s, crypt(%s, gen_salt('bf', 12)), TRUE)",
+                    [correo, password],
+                )
 
     def _resetear(self, correo, password):
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE core.sysadmin "
-                "SET password_hash = crypt(%s, gen_salt('bf', 12)), activo = TRUE "
-                "WHERE correo = %s",
-                [password, correo],
-            )
+        with sysadmin_context(None):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE core.sysadmin "
+                    "SET password_hash = crypt(%s, gen_salt('bf', 12)), activo = TRUE "
+                    "WHERE correo = %s",
+                    [password, correo],
+                )

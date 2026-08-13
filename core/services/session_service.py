@@ -5,7 +5,7 @@ import jwt
 from django.conf import settings
 from django.utils import timezone
 
-from core.models import ConfigSeguridadTenant, Sesion
+from core.models import ConfigSeguridadTenant, Sesion, Tenant
 from core.utils.audit import audit_context, client_ip
 
 # Expiracion por defecto cuando el tenant no tiene fila en
@@ -66,7 +66,7 @@ def crear_sesion(request, tenant, usuario_id):
     return sesion, token
 
 
-def sesion_valida(jti):
+def sesion_valida(jti, tenant_slug=None):
     """Unica autoridad sobre si un JWT sigue vigente (Sprint 5): el token
     acredita identidad, pero es core.sesion quien decide si esa identidad
     conserva una sesion viva. La revocacion (RF-17/RF-19) nunca depende del
@@ -75,12 +75,20 @@ def sesion_valida(jti):
     Verdadero solo si la sesion existe, no ha sido revocada y no ha expirado.
     Sin efectos secundarios: no cierra sesiones ni audita; eso pertenece a los
     RF que corresponda.
+
+    core.sesion tiene tenant_id y por tanto RLS: bajo el rol restringido de
+    produccion, consultarla sin fijar antes app.current_tenant_id siempre
+    devuelve vacio (la politica tenant_isolation la filtra), aunque la sesion
+    exista y sea valida. tenant_slug viene del propio JWT (tid), asi que se
+    resuelve el tenant antes de abrir el contexto, igual que en validar_otp.
     """
     if not jti:
         return False
-    return Sesion.objects.filter(
-        jwt_id=str(jti), revocada_en__isnull=True, expira_en__gt=timezone.now()
-    ).exists()
+    tenant = Tenant.objects.filter(slug=tenant_slug).first() if tenant_slug else None
+    with audit_context(None, tenant_id=tenant.id if tenant else None):
+        return Sesion.objects.filter(
+            jwt_id=str(jti), revocada_en__isnull=True, expira_en__gt=timezone.now()
+        ).exists()
 
 
 # ------------------------------------------------------- RF-17 / RF-19

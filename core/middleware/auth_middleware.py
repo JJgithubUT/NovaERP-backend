@@ -64,7 +64,7 @@ class JWTCustomMiddleware:
                     if sysadmin_id is not None:
                         request.sysadmin_id = str(sysadmin_id)
                         request.session_jti = jti
-                elif session_service.sesion_valida(jti):
+                elif session_service.sesion_valida(jti, tenant_slug=payload.get("tid")):
                     request.usuario_id = payload.get("sub")
                     request.tenant_slug = payload.get("tid")
                     request.session_jti = jti

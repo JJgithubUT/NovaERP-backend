@@ -194,14 +194,34 @@ if not DEBUG:
 # El esquema NO lo administra Django (los modelos son managed=False; la fuente
 # de verdad esta en sql/). El usuario de la aplicacion no necesita permisos de
 # DDL en despliegue: basta SELECT/INSERT/UPDATE/DELETE sobre los esquemas.
+#
+# DATABASE_URL es opcional: existe porque proveedores como Render solo dan una
+# cadena de conexion (postgresql://usuario:password@host:puerto/nombre), no
+# variables sueltas. Si esta presente, rellena los defaults de DB_*; cualquier
+# DB_* explicito en el entorno sigue ganando (por si hay que pisar un solo
+# campo sin tocar la URL completa).
+_db_url = env('DATABASE_URL')
+if _db_url:
+    from urllib.parse import urlsplit
+    _partes = urlsplit(_db_url)
+    _DB_DEFAULTS = {
+        'NAME': (_partes.path or '/').lstrip('/'),
+        'USER': _partes.username or '',
+        'PASSWORD': _partes.password or '',
+        'HOST': _partes.hostname or 'localhost',
+        'PORT': str(_partes.port or 5432),
+    }
+else:
+    _DB_DEFAULTS = {'NAME': None, 'USER': None, 'PASSWORD': None, 'HOST': 'localhost', 'PORT': '5432'}
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': env('DB_NAME'),
-        'USER': env('DB_USER'),
-        'PASSWORD': env('DB_PASSWORD'),
-        'HOST': env('DB_HOST', 'localhost'),
-        'PORT': env('DB_PORT', '5432'),
+        'NAME': env('DB_NAME', _DB_DEFAULTS['NAME']),
+        'USER': env('DB_USER', _DB_DEFAULTS['USER']),
+        'PASSWORD': env('DB_PASSWORD', _DB_DEFAULTS['PASSWORD']),
+        'HOST': env('DB_HOST', _DB_DEFAULTS['HOST']),
+        'PORT': env('DB_PORT', _DB_DEFAULTS['PORT']),
         # Conexiones persistentes: evita el coste de abrir una conexion por
         # peticion. 0 = comportamiento anterior (abrir y cerrar cada vez).
         'CONN_MAX_AGE': env_int('DB_CONN_MAX_AGE', 0 if DEBUG else 60),
@@ -215,8 +235,14 @@ DATABASES = {
     }
 }
 if not DEBUG:
-    for _var in ('DB_NAME', 'DB_USER', 'DB_PASSWORD'):
-        _exigir(_var, env(_var), 'La conexion a PostgreSQL no puede quedar a medias.')
+    # Revisa el valor YA RESUELTO (DB_* explicito o, en su defecto, lo que
+    # trajo DATABASE_URL) -- no la variable de entorno cruda, o esta
+    # validacion rechazaria un despliegue configurado solo con DATABASE_URL
+    # (el caso de Render) aunque la conexion este completa.
+    for _campo in ('NAME', 'USER', 'PASSWORD'):
+        _exigir(f'DB_{_campo}', DATABASES['default'][_campo],
+                'La conexion a PostgreSQL no puede quedar a medias '
+                '(defina DB_* sueltas o DATABASE_URL).')
 
 
 # ----------------------------------------------------------------------------
@@ -255,6 +281,14 @@ if EMAIL_USE_TLS and EMAIL_USE_SSL:
     )
 if not DEBUG and EMAIL_BACKEND.endswith('smtp.EmailBackend'):
     _exigir('EMAIL_HOST', env('EMAIL_HOST'), 'El backend SMTP necesita un servidor.')
+
+# Origen del frontend, para armar el enlace clicable de los correos con token
+# (activacion, verificacion de correo, restablecimiento). Sin barra final, igual
+# que CORS_ALLOWED_ORIGINS.
+FRONTEND_URL = env('FRONTEND_URL', 'http://localhost:4200' if DEBUG else '')
+if not DEBUG:
+    _exigir('FRONTEND_URL', FRONTEND_URL,
+            'Los correos con token necesitan saber a que origen enlazar (https://…).')
 
 
 # ----------------------------------------------------------------------------

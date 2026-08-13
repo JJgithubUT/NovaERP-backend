@@ -1,0 +1,139 @@
+# Blueprint de Render para NovaERP backend + worker de correo (RF-25).
+# Ver docs/DESPLIEGUE-RENDER.md para el procedimiento completo.
+#
+# Por que las variables se repiten en los dos servicios en vez de compartir un
+# grupo: settings.py exige SECRET_KEY/ALLOWED_HOSTS/CORS_ALLOWED_ORIGINS/DB/
+# FRONTEND_URL con DEBUG=False sin importar que proceso las lea -- el cron
+# nunca sirve HTTP, pero igual falla al arrancar si faltan. No se usa un
+# Environment Group aqui porque el spec de Render no documenta con certeza la
+# sintaxis para engancharlo desde el blueprint (fromGroup); es mas seguro
+# declarar cada variable donde el spec SI la confirma. Una vez desplegado,
+# puede crear un Environment Group desde el dashboard y enlazar ambos
+# servicios a mano -- ahi la UI lo hace por usted, sin depender de YAML.
+#
+# Los valores marcados `sync: false` NO se completan aqui: Render los pide una
+# sola vez, por servicio, durante la creacion del Blueprint en el dashboard.
+
+databases:
+  - name: novaerp-db
+    region: oregon
+    plan: basic-1gb # ajuste segun el volumen real; "free" expira a los 30 dias, no usar en produccion
+    postgresMajorVersion: "17"
+
+services:
+  - type: web
+    name: novaerp-backend
+    runtime: python
+    region: oregon # mismo region que novaerp-db: fromDatabase resuelve a la URL interna solo si coinciden
+    plan: starter
+    buildCommand: "pip install -r requirements-prod.txt"
+    startCommand: "gunicorn novaerp_backend.wsgi:application --workers 3 --timeout 60 --access-logfile - --error-logfile -"
+    healthCheckPath: /api/health/
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: novaerp-db
+          property: connectionString
+      - key: DEBUG
+        value: "False"
+      - key: DB_SSLMODE
+        value: require
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000" # monotonia de timeouts, ver docs/DESPLIEGUE.md §8.3
+      - key: USE_X_FORWARDED_FOR
+        value: "True" # Render termina TLS y reenvia X-Forwarded-Proto
+      - key: SECURE_SSL_REDIRECT
+        value: "True"
+      - key: EMAIL_BACKEND
+        value: "django.core.mail.backends.smtp.EmailBackend"
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "True"
+      - key: EMAIL_USE_SSL
+        value: "False"
+      - key: EMAIL_TIMEOUT
+        value: "20"
+      - key: LANGUAGE_CODE
+        value: "es-mx"
+      - key: TIME_ZONE
+        value: "America/Mexico_City"
+      - key: LOG_LEVEL
+        value: "INFO"
+      # --- Se completan en el dashboard al crear el Blueprint (sync: false) ---
+      - key: SECRET_KEY
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+
+  - type: cron
+    name: novaerp-enviar-notificaciones
+    runtime: python
+    region: oregon
+    plan: starter
+    schedule: "* * * * *" # UTC; cada minuto, ver docs/DESPLIEGUE-CORREO.md §6
+    buildCommand: "pip install -r requirements-prod.txt"
+    startCommand: "python manage.py enviar_notificaciones"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: novaerp-db
+          property: connectionString
+      - key: DEBUG
+        value: "False"
+      - key: DB_SSLMODE
+        value: require
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "15000"
+      - key: EMAIL_BACKEND
+        value: "django.core.mail.backends.smtp.EmailBackend"
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USE_TLS
+        value: "True"
+      - key: EMAIL_USE_SSL
+        value: "False"
+      - key: EMAIL_TIMEOUT
+        value: "20"
+      - key: LANGUAGE_CODE
+        value: "es-mx"
+      - key: TIME_ZONE
+        value: "America/Mexico_City"
+      - key: LOG_LEVEL
+        value: "INFO"
+      # ALLOWED_HOSTS y CORS_ALLOWED_ORIGINS no significan nada para un
+      # proceso que nunca sirve HTTP, pero settings.py los exige igual con
+      # DEBUG=False sin mirar que proceso los lee -- se omiten aqui
+      # USE_X_FORWARDED_FOR/SECURE_SSL_REDIRECT/CSRF_TRUSTED_ORIGINS porque
+      # esas SI son opcionales (tienen default utilizable) aunque el cron las
+      # cargue sin usarlas.
+      - key: SECRET_KEY
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false

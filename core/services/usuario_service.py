@@ -4,6 +4,7 @@ import secrets
 import uuid
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.utils import timezone
@@ -123,7 +124,7 @@ def _validar_password(tenant, password):
         )
 
 
-def _encolar_correo(usuario, token, now, asunto, instruccion, correo_destino=None):
+def _encolar_correo(usuario, token, now, asunto, instruccion, ruta, correo_destino=None):
     """Postcondicion "correo enviado (o en cola de reintento)" de RF-05 y CA04
     de RF-07: el envio real lo hara el worker de notificaciones de RF-25; aqui
     la notificacion queda en 'pendiente' para que ese worker la tome.
@@ -132,7 +133,14 @@ def _encolar_correo(usuario, token, now, asunto, instruccion, correo_destino=Non
     (alta de cuenta, reconfirmacion de correo, restablecimiento de contrasena),
     porque el mecanismo de verificacion de identidad es el mismo. No indica una
     vigencia fija en el texto: cada flujo tiene la suya (24 h activacion, 1 h
-    reset) y la DB la hace cumplir."""
+    reset) y la DB la hace cumplir.
+
+    `ruta` es la pagina del frontend que canjea el token (p.ej. '/activar' o
+    '/restablecer'); junto con FRONTEND_URL arma el enlace clicable. El token
+    en claro se deja tambien en el cuerpo -por si FRONTEND_URL no esta
+    configurado o el cliente de correo no muestra el enlace- porque las
+    pantallas de canje aceptan pegarlo a mano."""
+    enlace = f"{settings.FRONTEND_URL}{ruta}?token={token}" if settings.FRONTEND_URL else None
     return Notificacion.objects.create(
         id=uuid.uuid4(),
         tenant=usuario.tenant,
@@ -140,8 +148,9 @@ def _encolar_correo(usuario, token, now, asunto, instruccion, correo_destino=Non
         canal="email",
         asunto=asunto,
         cuerpo=(
-            f"Hola {usuario.nombre_completo}: {instruccion} con el siguiente "
-            f"token de un solo uso: {token}"
+            f"Hola {usuario.nombre_completo}: {instruccion}. "
+            + (f"Siga este enlace: {enlace}\n\n" if enlace else "")
+            + f"Si el enlace no funciona, use este token de un solo uso: {token}"
             + (f" (enviado a {correo_destino})" if correo_destino else "")
         ),
         estado="pendiente",
@@ -155,6 +164,7 @@ def _encolar_correo_activacion(usuario, token, now):
         usuario, token, now,
         asunto="Activacion de su cuenta NovaERP",
         instruccion="active su cuenta y defina su contrasena",
+        ruta="/activar",
     )
 
 
@@ -164,6 +174,7 @@ def _encolar_correo_verificacion(usuario, token, now):
         usuario, token, now,
         asunto="Confirme su nueva direccion de correo NovaERP",
         instruccion="confirme su nueva direccion de correo",
+        ruta="/activar",
         correo_destino=usuario.correo,
     )
 
@@ -560,6 +571,7 @@ def solicitar_restablecimiento(data, request):
             usuario, token, now,
             asunto="Restablecimiento de contrasena NovaERP",
             instruccion="restablezca su contrasena",
+            ruta="/restablecer",
         )
 
 

@@ -8,6 +8,8 @@ procedimiento paso a paso y la verificación posterior.
 > [`README.md`](../README.md) (instalación y desarrollo) ·
 > [`.env.example`](../.env.example) (todas las variables) ·
 > [`docs/DESPLIEGUE-CORREO.md`](DESPLIEGUE-CORREO.md) (SMTP y worker de correo) ·
+> [`docs/DESPLIEGUE-RENDER.md`](DESPLIEGUE-RENDER.md) (esta misma guía, adaptada
+> a Render — léala si el destino es Render y no un servidor propio) ·
 > [`novaerp-mobile/DESPLIEGUE-MOVIL.md`](../../novaerp-mobile/DESPLIEGUE-MOVIL.md)
 > (la app Flutter; **§8 de esta guía** cubre cómo empatar ambos despliegues).
 
@@ -633,7 +635,8 @@ la autenticación ya es por `Authorization` y sin estado de sesión Django.
 ⚠️ **Ojo con `CORS_ALLOWED_ORIGINS`**: `settings.py` la exige con `DEBUG=False`
 y **el backend no arranca sin ella** (§0). Si algún día el móvil fuera el único
 cliente, esa exigencia obligaría a inventar un valor ficticio. Hoy no es
-problema —hay frontend web, y `ACTIVACION_URL_BASE` apunta a él—, pero no ponga
+problema —hay frontend web, y `ACTIVACION_URL_BASE` (config de la app móvil,
+`novaerp-mobile/config/prod.json`) apunta a él—, pero no ponga
 un origen falso «para que arranque»: liste el del frontend web real.
 
 ### 8.3 Desajuste de tiempos de espera — corregir

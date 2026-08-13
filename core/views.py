@@ -1,6 +1,7 @@
 import json
 
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.db.models import Max
 from django.http import JsonResponse
 from django.utils.decorators import method_decorator
@@ -621,3 +622,18 @@ class UsuarioRolDeleteView(_UsuarioRolBase):
             return JsonResponse({"detail": "No encontrado"}, status=404)
 
         return JsonResponse(rol_svc.roles_de_usuario(usuario))
+
+
+# ---------------------------------------------------------------- Despliegue
+
+def health(request):
+    """Chequeo de vida para el balanceador y el health check de Render.
+    Publico a proposito: el JWTCustomMiddleware no bloquea peticiones sin
+    token, solo deja los identificadores en None."""
+
+    try:
+        with connection.cursor() as cur:
+            cur.execute("SELECT 1")
+        return JsonResponse({"estado": "ok"})
+    except Exception:
+        return JsonResponse({"estado": "degradado"}, status=503)

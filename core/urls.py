@@ -26,6 +26,7 @@ from core.views import (
     UsuarioSuspenderView,
     UsuarioRolCreateView,
     UsuarioRolDeleteView,
+    health,
 )
 from core.views_sysadmin import (
     CatalogosView,
@@ -41,6 +42,8 @@ from core.views_sysadmin import (
 )
 
 urlpatterns = [
+    # Chequeo de vida (Render / balanceador). Publico a proposito.
+    path('api/health/', health, name='health'),
     # Portal de plataforma (SysAdmin) — superficie separada de la de tenant.
     # Fundacion habilitante para RF-01..04 (gestion de tenants).
     path('api/admin/login/', SysAdminLoginView.as_view(), name='sysadmin-login'),

@@ -134,6 +134,9 @@ celerybeat.pid
 # Environments
 .env
 .claude
+
+# Wrappers locales de tarea programada (rutas de maquina especificas)
+scripts/enviar_notificaciones.bat
 .venv
 env/
 venv/

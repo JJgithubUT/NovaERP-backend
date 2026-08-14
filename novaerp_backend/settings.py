@@ -181,7 +181,7 @@ WSGI_APPLICATION = 'novaerp_backend.wsgi.application'
 # En desarrollo conviene listar los dos puertos habituales a la vez:
 #   CORS_ALLOWED_ORIGINS=http://localhost:4200,http://localhost:5173
 CORS_ALLOWED_ORIGINS = env_list(
-    'CORS_ALLOWED_ORIGINS', ['http://localhost:4200'] if DEBUG else []
+    'CORS_ALLOWED_ORIGINS', ['http://localhost:5173'] if DEBUG else []
 )
 if not DEBUG:
     _exigir('CORS_ALLOWED_ORIGINS', CORS_ALLOWED_ORIGINS,
@@ -285,7 +285,7 @@ if not DEBUG and EMAIL_BACKEND.endswith('smtp.EmailBackend'):
 # Origen del frontend, para armar el enlace clicable de los correos con token
 # (activacion, verificacion de correo, restablecimiento). Sin barra final, igual
 # que CORS_ALLOWED_ORIGINS.
-FRONTEND_URL = env('FRONTEND_URL', 'http://localhost:4200' if DEBUG else '')
+FRONTEND_URL = env('FRONTEND_URL', 'http://localhost:5173' if DEBUG else '')
 if not DEBUG:
     _exigir('FRONTEND_URL', FRONTEND_URL,
             'Los correos con token necesitan saber a que origen enlazar (https://…).')

@@ -22,7 +22,7 @@ from core.models import (
 from core.services import catalogo_service, session_service
 from core.services.usuario_service import (
     ACTIVACION_VIGENCIA,
-    _encolar_correo_activacion,
+    _encolar_correo,
     _hash_token,
     _nuevo_token_activacion,
     _validar_correo,
@@ -51,6 +51,26 @@ _ORDEN_TENANTS = {
     "plan": "plan__codigo",
 }
 _TRUE = {"1", "true", "si", "sí"}
+
+
+def _encolar_correo_activacion_tenant(admin, token, now):
+    """Correo del administrador inicial de un tenant recien dado de alta.
+
+    NO puede reusar el de RF-05 (`_encolar_correo_activacion`): aquel enlaza a
+    `/activar`, que canjea el token contra `POST /api/auth/activar/`, y ese
+    endpoint exige que el tenant ya este activo. El del admin inicial esta en
+    'pendiente' —es justo lo que este enlace viene a resolver—, asi que el canje
+    fallaba con "La cuenta no puede activarse en este momento".
+
+    Su canje es el de RF-01: `/activar-organizacion`, que activa en cascada al
+    usuario Y al tenant (`POST /api/auth/activar-tenant/`).
+    """
+    return _encolar_correo(
+        admin, token, now,
+        asunto="Activacion de su cuenta NovaERP",
+        instruccion="active su organizacion y defina su contrasena",
+        ruta="/activar-organizacion",
+    )
 
 
 # ------------------------------------------------------- eventos de plataforma
@@ -248,7 +268,7 @@ def crear_tenant(data, request):
             ]
         )
 
-        _encolar_correo_activacion(admin, token, now)
+        _encolar_correo_activacion_tenant(admin, token, now)
 
         # CA08: evento de plataforma con el SysAdmin responsable.
         _evento_plataforma(
@@ -386,7 +406,7 @@ def reenviar_activacion(tenant_id, request):
         admin.save(
             update_fields=["token_activacion", "token_activacion_exp", "updated_at"]
         )
-        _encolar_correo_activacion(admin, token, now)
+        _encolar_correo_activacion_tenant(admin, token, now)
 
         _evento_plataforma(
             request, "TENANT_REENVIO_ACTIVACION", "usuario", admin.id,

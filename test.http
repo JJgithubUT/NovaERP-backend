@@ -249,6 +249,21 @@ curl -X PATCH $HOST/api/core/usuarios/00000000-0000-0000-0000-000000000000/ \
   -H "Content-Type: application/json" \
   -d '{"nombre_completo":"Ajeno"}'
 
+# RF-05 (cierre del alta): reemite el correo de activación de un usuario que sigue
+# esperándolo. Solo en 'pendiente' y 'pendiente_verificacion'; en cualquier otro
+# estado -> 422. ROTA el token: el enlace anterior deja de servir. Devuelve el
+# nuevo en claro (activacion_token) y su caducidad (expira_en).
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reenviar-activacion/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# Sobre un usuario ya activo -> 422 "no hay enlace que reenviar"
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reenviar-activacion/ \
+  -H "Authorization: Bearer $TOKEN"
+
+# Sin core:usuarios:crear -> 403
+curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reenviar-activacion/ \
+  -H "Authorization: Bearer $TOKEN_NO_ADMIN"
+
 # RF-07 / RF-16 RN07: reseteo de MFA, exclusivo del TENANT_ADMIN. Deja al usuario
 # sin segundo factor; su próximo login devuelve mfa:"enroll" con un secreto nuevo.
 curl -X POST $HOST/api/core/usuarios/$USUARIO_ID/reset-mfa/ \

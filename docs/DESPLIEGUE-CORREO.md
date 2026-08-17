@@ -44,10 +44,11 @@ Todos se encolan igual y salen por el mismo worker:
 
 | Disparador | Asunto | Contiene |
 |---|---|---|
-| Alta de tenant (RF-01) | Activación de su cuenta NovaERP | Token de activación, 24 h |
-| Reenvío de activación | Activación de su cuenta NovaERP | Token nuevo (rota el anterior), 24 h |
+| Alta de tenant (RF-01) | Activación de su cuenta NovaERP | Token de activación, 24 h. Enlaza a `/activar-organizacion`, **no** a `/activar`: el admin inicial activa usuario y tenant en cascada, y `/activar` exige que el tenant ya esté activo. |
+| Reenvío de activación (tenant) | Activación de su cuenta NovaERP | Token nuevo (rota el anterior), 24 h. Mismo destino que el de alta. |
 | Alta de usuario (RF-05) | Activación de su cuenta NovaERP | Token de activación, 24 h |
 | Cambio de correo (RF-07) | Confirme su nueva dirección NovaERP | Token de verificación, 24 h |
+| Reenvío de activación (usuario) | El que corresponda a su estado: activación si está `pendiente`, confirmación si está `pendiente_verificacion` | Token nuevo (rota el anterior), 24 h |
 | Restablecer contraseña (RF-18) | Restablecimiento de contraseña NovaERP | Token de un solo uso, **1 h** |
 | Cuenta bloqueada (RF-25 / RF-16) | Alerta de seguridad: cuenta bloqueada | Sin credenciales: solo el evento y la referencia a la bitácora |
 

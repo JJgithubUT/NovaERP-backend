@@ -191,6 +191,42 @@ class UsuarioResetMfaView(PermissionRequiredMixin, View):
         return JsonResponse(usuario_svc.serialize_usuario(usuario))
 
 
+@method_decorator(csrf_exempt, name="dispatch")
+class UsuarioReenviarActivacionView(PermissionRequiredMixin, View):
+    """RF-05 (cierre del flujo de alta): el TENANT_ADMIN reemite el correo de
+    activacion de un usuario que sigue esperandolo. Rota el token (el enlace
+    anterior deja de servir) y devuelve el nuevo en claro por unica vez.
+
+    Exige core:usuarios:crear y no core:usuarios:editar: esto no modifica los
+    datos del usuario, es la continuacion del alta que ese mismo permiso
+    autoriza. Sin bypass de auto-edicion: nadie se reenvia su propio enlace por
+    esta via, porque para usarla ya haria falta la sesion que el enlace
+    justamente permite obtener."""
+
+    permiso_requerido = "core:usuarios:crear"
+
+    def post(self, request, pk):
+        try:
+            usuario = tenant_scoped(
+                Usuario.objects.select_related("tenant"), request
+            ).get(pk=pk)
+        except (Usuario.DoesNotExist, ValidationError, ValueError):
+            return JsonResponse({"detail": "No encontrado"}, status=404)
+
+        try:
+            usuario, token = usuario_svc.reenviar_activacion(usuario, request)
+        except BusinessRuleError as e:
+            return JsonResponse(e.to_dict(), status=422)
+
+        payload = usuario_svc.serialize_usuario(usuario)
+        # Mismo criterio que el alta: el token solo existe en claro en este
+        # instante, y se entrega para que el admin pueda pasar el enlace a mano
+        # si el correo no llega.
+        payload["activacion_token"] = token
+        payload["expira_en"] = usuario.token_activacion_exp.isoformat()
+        return JsonResponse(payload)
+
+
 # ---------------------------------------------------------------- RF-08
 
 @method_decorator(csrf_exempt, name="dispatch")

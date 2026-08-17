@@ -460,6 +460,64 @@ def activar_usuario(data, request):
     return usuario
 
 
+def reenviar_activacion(usuario, request):
+    """Cierre del flujo de alta de RF-05: el TENANT_ADMIN reemite el correo con
+    el token de un usuario que sigue esperando activarse.
+
+    Sin esta via, un enlace vencido (24 h) o que nunca llego deja la cuenta
+    atrapada: RN03 mantiene la activacion fuera del login (RF-16), y el
+    restablecimiento de contrasena (RF-18) exige una cuenta ya activa. La unica
+    salida era dar de alta otro usuario con otro correo. Es el equivalente, en
+    el ambito del tenant, de lo que reenviar_activacion de RF-01 hace para el
+    administrador inicial.
+
+    Cubre los dos estados que esperan un token, y encola el correo que
+    corresponde a cada uno:
+
+      · 'pendiente'              -> alta sin contrasena: correo de activacion.
+      · 'pendiente_verificacion' -> cambio de correo (RF-07\\RN05): correo de
+                                    confirmacion de la direccion nueva.
+
+    ROTA el token: emite uno nuevo y descarta el anterior en la misma
+    escritura, de modo que un enlace filtrado deja de servir en cuanto se
+    reenvia. El token en claro se devuelve una sola vez (en la tabla vive su
+    hash), igual que en el alta.
+
+    Devuelve (usuario, token). El estado no cambia: sigue esperando a que el
+    titular consuma el enlace.
+    """
+    if usuario.tenant.estado != "activo":
+        raise BusinessRuleError(
+            "El tenant no esta activo; no admite reenvios de activacion.",
+            extra={"estado_tenant": usuario.tenant.estado},
+        )
+
+    if usuario.estado not in ("pendiente", "pendiente_verificacion"):
+        raise BusinessRuleError(
+            "Este usuario no esta esperando activacion; no hay enlace que reenviar.",
+            campo="estado",
+            extra={"estado": usuario.estado},
+        )
+
+    token, token_hash = _nuevo_token_activacion()
+    now = timezone.now()
+
+    with audit_context(request, tenant_id=usuario.tenant_id):
+        usuario.token_activacion = token_hash
+        usuario.token_activacion_exp = now + ACTIVACION_VIGENCIA
+        usuario.updated_at = now
+        usuario.save(
+            update_fields=["token_activacion", "token_activacion_exp", "updated_at"]
+        )
+
+        if usuario.estado == "pendiente":
+            _encolar_correo_activacion(usuario, token, now)
+        else:
+            _encolar_correo_verificacion(usuario, token, now)
+
+    return usuario, token
+
+
 # ----------------------------------------------------------------- RF-08
 
 def _es_ultimo_admin_activo(usuario):

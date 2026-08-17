@@ -1176,6 +1176,33 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/core/usuarios/{id}/reenviar-activacion/:
+    parameters: [ { $ref: "#/components/parameters/idPath" } ]
+    post:
+      tags: [Núcleo — Usuarios]
+      summary: Reenviar el correo de activación de un usuario que sigue esperándolo
+      description: >
+        Solo en `pendiente` (alta sin canjear) y `pendiente_verificacion` (correo por
+        reconfirmar); en cualquier otro estado responde 422. Encola el correo que
+        corresponde al estado y **rota el token**: el enlace anterior deja de servir.
+        El nuevo se devuelve en claro una sola vez, junto con su caducidad (24 h).
+        Exige `core:usuarios:crear`, el mismo permiso que el alta.
+      responses:
+        "200":
+          description: Enlace reemitido.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Usuario"
+                  - type: object
+                    properties:
+                      activacion_token: { type: string, description: En claro, una sola vez. }
+                      expira_en: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/BusinessError" }
   /api/core/usuarios/{id}/cerrar-sesiones/:
     parameters: [ { $ref: "#/components/parameters/idPath" } ]
     post:

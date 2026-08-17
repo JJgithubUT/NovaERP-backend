@@ -22,6 +22,7 @@ from core.views import (
     UsuarioListCreateView,
     UsuarioDetailView,
     UsuarioReactivarView,
+    UsuarioReenviarActivacionView,
     UsuarioResetMfaView,
     UsuarioSuspenderView,
     UsuarioRolCreateView,
@@ -91,6 +92,13 @@ urlpatterns = [
     ),
     path('api/core/sesiones/<str:jti>/', SesionDetailView.as_view(), name='sesion-detail'),
     path('api/core/usuarios/', UsuarioListCreateView.as_view(), name='usuario-list-create'),
+    # RF-05: reemite el correo de activacion de un usuario que sigue esperandolo
+    # (accion del TENANT_ADMIN, misma autorizacion que el alta).
+    path(
+        'api/core/usuarios/<str:pk>/reenviar-activacion/',
+        UsuarioReenviarActivacionView.as_view(),
+        name='usuario-reenviar-activacion',
+    ),
     # RF-07
     path('api/core/usuarios/<str:pk>/', UsuarioDetailView.as_view(), name='usuario-detail'),
     # RF-07 / RF-16 RN07: reseteo de MFA (accion exclusiva del TENANT_ADMIN)

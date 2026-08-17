@@ -98,6 +98,7 @@ flowchart TD
   D[Directorio de usuarios<br/>GET /api/core/usuarios/] -->|core:usuarios:leer| A[Alta<br/>POST /api/core/usuarios/]
   D --> E[Editar<br/>PATCH /api/core/usuarios/id/]
   D --> S[Suspender / Reactivar<br/>POST .../suspender/ · .../reactivar/]
+  D --> V[Reenviar activación<br/>POST .../reenviar-activacion/]
   D --> M[Resetear MFA<br/>POST .../reset-mfa/]
   D --> R[Asignar / revocar roles<br/>POST · DELETE .../roles/]
   D --> C[Cerrar sesiones del usuario<br/>POST .../cerrar-sesiones/]
@@ -110,6 +111,7 @@ flowchart TD
 | **Editar** | `PATCH /api/core/usuarios/{id}/` | `core:usuarios:editar` | El admin edita `nombre_completo`, `telefono`, `correo`, `puesto`, `departamento`. **Cambiar el correo** pone al usuario en `pendiente_verificacion` y devuelve `verificacion_token`. |
 | **Suspender** | `POST /api/core/usuarios/{id}/suspender/` | `core:usuarios:suspender` | Cierra **todas** las sesiones del usuario y bloquea su login. **No** se puede suspender al **último** administrador activo (→ `422`). |
 | **Reactivar** | `POST /api/core/usuarios/{id}/reactivar/` | `core:usuarios:suspender` | Conserva los roles; el login vuelve a funcionar. |
+| **Reenviar activación** | `POST /api/core/usuarios/{id}/reenviar-activacion/` | `core:usuarios:crear` | Solo en `pendiente` y `pendiente_verificacion` (en otro estado → `422`). Encola el correo que toca según el estado y **rota el token**: el enlace anterior deja de servir. Devuelve `activacion_token` y `expira_en`. |
 | **Resetear MFA** | `POST /api/core/usuarios/{id}/reset-mfa/` | `core:usuarios:reset_mfa` | Para pérdida de dispositivo: el usuario re-enrola en su próximo login. Acción exclusiva del admin. |
 | **Asignar roles** | `POST /api/core/usuarios/{id}/roles/` | `core:asignaciones:crear` | Cuerpo `{roles: [rolId, ...]}`. Solo roles activos del tenant. |
 | **Revocar rol** | `DELETE /api/core/usuarios/{id}/roles/{rolId}/` | `core:asignaciones:eliminar` | No deja al usuario sin roles; no revoca al último admin. |
@@ -214,6 +216,7 @@ Administración de usuarios (por permiso)
   PATCH  /api/core/usuarios/{id}/                  editar (o propio)
   POST   /api/core/usuarios/{id}/suspender/        suspender
   POST   /api/core/usuarios/{id}/reactivar/        suspender
+  POST   /api/core/usuarios/{id}/reenviar-activacion/  crear
   POST   /api/core/usuarios/{id}/reset-mfa/        reset_mfa
   POST   /api/core/usuarios/{id}/cerrar-sesiones/  sesiones:revocar
   POST   /api/core/usuarios/{id}/roles/            asignaciones:crear
